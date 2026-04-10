@@ -378,27 +378,29 @@ async def save_info_url(m: Message, state: FSMContext):
 # ─── РЕДАКТОР КНОПОК ──────────────────────────────────────────────────────────
 
 BTN_MAPPING = {
-    "vpn":      ("btn_vpn",      "btn_vpn_emoji"),
-    "ref":      ("btn_ref",      "btn_ref_emoji"),
-    "gift":     ("btn_gift",     "btn_gift_emoji"),
-    "prof_buy": ("btn_prof_buy", "btn_prof_buy_emoji"),
-    "agree":    ("btn_agree",    "btn_agree_emoji"),
-    "supp":     ("btn_supp",     "btn_supp_emoji"),
-    "free":     ("btn_free",     "btn_free_emoji"),
-    "promo":    ("btn_promo",    "btn_promo_emoji"),
-    "back":     ("btn_back",     "btn_back_emoji"),
+    "vpn":       ("btn_vpn",       "btn_vpn_emoji"),
+    "ref":       ("btn_ref",       "btn_ref_emoji"),
+    "gift":      ("btn_gift",      "btn_gift_emoji"),
+    "gift_make": ("btn_gift_make", "btn_gift_make_emoji"),
+    "prof_buy":  ("btn_prof_buy",  "btn_prof_buy_emoji"),
+    "agree":     ("btn_agree",     "btn_agree_emoji"),
+    "supp":      ("btn_supp",      "btn_supp_emoji"),
+    "free":      ("btn_free",      "btn_free_emoji"),
+    "promo":     ("btn_promo",     "btn_promo_emoji"),
+    "back":      ("btn_back",      "btn_back_emoji"),
 }
 
 BTN_LABELS = {
-    "vpn":      "🌐 Управление VPN",
-    "ref":      "🤝 Пригласить",
-    "gift":     "🎁 Подарить",
-    "prof_buy": "💳 Оформить (Профиль)",
-    "agree":    "📄 Соглашение",
-    "supp":     "🛠 Поддержка",
-    "free":     "✅ Бесплатно",
-    "promo":    "🎟 Промокод",
-    "back":     "🔙 Вернуться/Назад",
+    "vpn":       "🌐 Управление VPN",
+    "ref":       "🤝 Пригласить",
+    "gift":      "🎁 Подарить (меню)",
+    "gift_make": "🎁 Сделать подарок",
+    "prof_buy":  "💳 Оформить (Профиль)",
+    "agree":     "📄 Соглашение",
+    "supp":      "🛠 Поддержка",
+    "free":      "✅ Бесплатно",
+    "promo":     "🎟 Промокод",
+    "back":      "🔙 Вернуться/Назад",
 }
 
 
@@ -541,10 +543,10 @@ async def save_global_emoji(m: Message, state: FSMContext):
 # ─── ЭМОДЗИ ГЛАВНЫХ КНОПОК МЕНЮ ──────────────────────────────────────────────
 
 KB_EMOJI_MAP = {
-    "kb_vpn_emoji":    ("⚡️", "⚡️ Подключить VPN"),
-    "kb_profile_emoji": ("👤", "👤 Профиль"),
-    "kb_info_emoji":   ("ℹ️", "ℹ️ Информация"),
-    "kb_admin_emoji":  ("🔧", "🔧 Администрирование"),
+    "kb_vpn_emoji":     ("⚡️", "⚡️ Подключить VPN",      "kb_vpn_emoji_id"),
+    "kb_profile_emoji": ("👤", "👤 Профиль",              "kb_profile_emoji_id"),
+    "kb_info_emoji":    ("ℹ️", "ℹ️ Информация",          "kb_info_emoji_id"),
+    "kb_admin_emoji":   ("🔧", "🔧 Администрирование",   "kb_admin_emoji_id"),
 }
 
 
@@ -552,17 +554,21 @@ KB_EMOJI_MAP = {
 async def admin_kb_emoji_menu(c: CallbackQuery):
     s = get_bot_settings()
     kb = []
-    for key, (default, label) in KB_EMOJI_MAP.items():
-        cur = s.get(key, default)
+    for key, (default, label, id_key) in KB_EMOJI_MAP.items():
+        cur_char = s.get(key, default)
+        cur_id   = s.get(id_key, "0")
+        id_str   = f"✅ кастом. ID:{cur_id}" if cur_id and cur_id != "0" else "стандарт"
         kb.append([InlineKeyboardButton(
-            text=f"{label}  →  сейчас: {cur}",
+            text=f"{label}  →  {cur_char} ({id_str})",
             callback_data=f"setkbe_{key}"
         )])
     kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     await c.message.edit_text(
         "⌨️ <b>Эмодзи кнопок главного меню</b>\n\n"
-        "Введите любой эмодзи (юникод) — он появится на кнопке вместо стандартного.\n\n"
-        "⚠️ Цвет фона кнопок задаётся темой Telegram и не может быть изменён ботом.",
+        "Для каждой кнопки можно задать:\n"
+        "• <b>Эмодзи-символ</b> — отображается в reply-клавиатуре (снизу экрана)\n"
+        "• <b>ID кастомного эмодзи</b> (Premium) — отображается в inline-кнопках меню\n\n"
+        "⚠️ Telegram не поддерживает кастомные эмодзи в reply-клавиатуре.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -570,24 +576,67 @@ async def admin_kb_emoji_menu(c: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("setkbe_"), F.from_user.id.in_(ADMIN_IDS))
 async def set_kb_emoji_req(c: CallbackQuery, state: FSMContext):
     key = c.data.replace("setkbe_", "")
-    default, label = KB_EMOJI_MAP.get(key, ("", key))
-    await state.update_data(kb_emoji_key=key)
-    await c.message.answer(
-        f"Кнопка: <b>{label}</b>\n\n"
-        f"Введите новый эмодзи для кнопки (например: 🚀 🔥 💫)\n"
-        f"или «0» для сброса к стандартному ({default}):"
+    default, label, id_key = KB_EMOJI_MAP.get(key, ("", key, ""))
+    await state.update_data(kb_emoji_key=key, kb_emoji_id_key=id_key, kb_emoji_default=default)
+    s = get_bot_settings()
+    cur_char = s.get(key, default)
+    cur_id   = s.get(id_key, "0")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="😀 Изменить эмодзи (символ)", callback_data="kbemoji_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="kbemoji_id")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_kb_emoji")],
+    ])
+    await c.message.edit_text(
+        f"🔧 <b>Кнопка: {label}</b>\n\n"
+        f"Текущий символ: {cur_char}\n"
+        f"Кастомный ID: <code>{cur_id}</code>",
+        reply_markup=kb
     )
+
+
+@admin_router.callback_query(F.data == "kbemoji_char", F.from_user.id.in_(ADMIN_IDS))
+async def kbemoji_char_req(c: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    default = d.get("kb_emoji_default", "")
+    await c.message.answer(
+        f"Введите новый эмодзи-символ (например ⚡️) или «0» для сброса к стандартному ({default}):"
+    )
+    await state.update_data(kb_save_mode="char")
     await state.set_state(AdminStates.wait_for_kb_emoji)
+    await c.answer()
+
+
+@admin_router.callback_query(F.data == "kbemoji_id", F.from_user.id.in_(ADMIN_IDS))
+async def kbemoji_id_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:")
+    await state.update_data(kb_save_mode="id")
+    await state.set_state(AdminStates.wait_for_kb_emoji)
+    await c.answer()
 
 
 @admin_router.message(AdminStates.wait_for_kb_emoji)
 async def save_kb_emoji(m: Message, state: FSMContext):
     d = await state.get_data()
-    key = d['kb_emoji_key']
-    default = KB_EMOJI_MAP.get(key, ("",))[0]
-    val = default if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(key, val)
-    await m.answer(f"✅ Эмодзи кнопки обновлён: {val}")
+    mode    = d.get("kb_save_mode", "char")
+    key     = d.get("kb_emoji_key", "")
+    id_key  = d.get("kb_emoji_id_key", "")
+    default = d.get("kb_emoji_default", "")
+
+    if mode == "char":
+        val = default if m.text.strip() == "0" else m.text.strip()
+        set_bot_setting(key, val)
+        await m.answer(f"✅ Эмодзи-символ обновлён: {val}")
+    else:
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -595,12 +644,13 @@ async def save_kb_emoji(m: Message, state: FSMContext):
 # ─── ЭМОДЗИ КНОПОК ОПЛАТЫ ─────────────────────────────────────────────────────
 
 PAY_EMOJI_MAP = {
-    "kb_pay_stars_emoji":      ("⭐️", "⭐️ Telegram Stars (выбор тарифа)",   "kb_pay_stars_id"),
-    "kb_pay_yoo_emoji":        ("💛", "💛 ЮMoney (выбор тарифа)",           "kb_pay_yoo_id"),
-    "kb_pay_crypto_emoji":     ("💎", "💎 CryptoBot (выбор тарифа)",        "kb_pay_crypto_id"),
-    "pay_btn_crypto_pay_emoji":("💎", "💎 Оплатить через CryptoBot",        "pay_btn_crypto_pay_id"),
-    "pay_btn_yoo_pay_emoji":   ("💛", "💛 Оплатить через ЮMoney",           "pay_btn_yoo_pay_id"),
-    "pay_btn_paid_emoji":      ("✅", "✅ Я оплатил",                       "pay_btn_paid_id"),
+    "kb_plan_emoji":           ("🗓", "🗓 Тариф (кнопки выбора тарифа)",  "kb_plan_emoji_id"),
+    "kb_pay_stars_emoji":      ("⭐️", "⭐️ Telegram Stars (выбор тарифа)", "kb_pay_stars_id"),
+    "kb_pay_yoo_emoji":        ("💛", "💛 ЮMoney (выбор тарифа)",          "kb_pay_yoo_id"),
+    "kb_pay_crypto_emoji":     ("💎", "💎 CryptoBot (выбор тарифа)",       "kb_pay_crypto_id"),
+    "pay_btn_crypto_pay_emoji":("💎", "💎 Оплатить через CryptoBot",       "pay_btn_crypto_pay_id"),
+    "pay_btn_yoo_pay_emoji":   ("💛", "💛 Оплатить через ЮMoney",          "pay_btn_yoo_pay_id"),
+    "pay_btn_paid_emoji":      ("✅", "✅ Я оплатил",                      "pay_btn_paid_id"),
 }
 
 

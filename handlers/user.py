@@ -73,8 +73,18 @@ def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
 
 
 def main_menu_kb():
+    s = get_bot_settings()
+    vpn_id = s.get("kb_vpn_emoji_id", "0")
+    if _is_valid_emoji_id(vpn_id):
+        vpn_btn = InlineKeyboardButton(
+            text=s.get("btn_vpn", "Управление VPN"),
+            callback_data="manage_vpn",
+            icon_custom_emoji_id=str(vpn_id)
+        )
+    else:
+        vpn_btn = make_btn("btn_vpn", "Управление VPN", "manage_vpn", "btn_vpn_emoji", "🌐")
     return InlineKeyboardMarkup(inline_keyboard=[
-        [make_btn("btn_vpn", "Управление VPN", "manage_vpn", "btn_vpn_emoji", "🌐")],
+        [vpn_btn],
         [make_btn("btn_ref", "Пригласить друга", "ref_menu", "btn_ref_emoji", "🤝")],
         [make_btn("btn_gift", "Подарить подписку", "gift_sub", "btn_gift_emoji", "🎁")]
     ])
@@ -501,7 +511,7 @@ async def ref_menu_cb(c: CallbackQuery):
 async def gift_sub_menu(c: CallbackQuery):
     t = get_bot_settings().get("gift_text", "🎁 Подарите подписку!")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Сделать подарок", callback_data="manage_vpn_gift")],
+        [make_btn("btn_gift_make", "Сделать подарок", "manage_vpn_gift", "btn_gift_make_emoji", "🎁")],
         [make_btn("btn_back", "Назад", "back_to_main", "btn_back_emoji", "🔙")]
     ])
     if c.message.animation:
