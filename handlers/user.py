@@ -616,20 +616,20 @@ def tariff_kb(plans, dev, is_gift):
     dev_row = []
     if _is_valid_emoji_id(down_id):
         dev_row.append(
-            InlineKeyboardButton(text="◀", callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
+            InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
     elif dev > 1:
-        dev_row.append(InlineKeyboardButton(text="◀", callback_data=f"{dev_p}_{p_c}"))
+        dev_row.append(InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}"))
     else:
-        dev_row.append(InlineKeyboardButton(text="◀", callback_data="ignore"))
+        dev_row.append(InlineKeyboardButton(text=down_e, callback_data="ignore"))
 
     dev_row.append(InlineKeyboardButton(text=str(dev), callback_data="ignore"))
 
     if _is_valid_emoji_id(up_id):
-        dev_row.append(InlineKeyboardButton(text="▶", callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
+        dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
     elif dev < 15:
-        dev_row.append(InlineKeyboardButton(text="▶", callback_data=f"{dev_p}_{n_c}"))
+        dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}"))
     else:
-        dev_row.append(InlineKeyboardButton(text="▶", callback_data="ignore"))
+        dev_row.append(InlineKeyboardButton(text=up_e, callback_data="ignore"))
 
     btns.append(dev_row)
 
