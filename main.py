@@ -6,6 +6,7 @@ from database.models import init_db
 # Импортируем роутеры из хендлеров
 from handlers.admin import admin_router
 from handlers.user import user_router
+from handlers.notifications import scheduler_task
 
 
 async def main():
@@ -22,7 +23,10 @@ async def main():
     # 3. Fallback (Эхо-хендлер для неизвестных сообщений)
     # В aiogram 3 он делается внутри роутера или просто добавляется последним
 
-    # 4. Запуск поллинга
+    # 4. Запускаем планировщик уведомлений
+    asyncio.create_task(scheduler_task(bot))
+
+    # 5. Запуск поллинга
     print("Бот запущен на aiogram 3...")
     # Пропускаем старые апдейты, чтобы бот не спамил при включении
     await bot.delete_webhook(drop_pending_updates=True)

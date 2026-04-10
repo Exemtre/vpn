@@ -111,6 +111,17 @@ def init_db():
     )
     """)
 
+    # Таблица отправленных уведомлений (для защиты от дублирования)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS notifications_sent (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        notif_key TEXT NOT NULL,
+        sent_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, notif_key)
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -350,5 +361,62 @@ def delete_user_device(device_id):
     """Удалить устройство по ID."""
     conn = get_conn()
     conn.execute("DELETE FROM vpn_devices WHERE id=?", (device_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_users_expiring_soon(hours_before: int):
+    """Возвращает пользователей, у которых подписка истекает в окне (hours_before±1) ч от текущего времени."""
+    import datetime as dt
+    conn = get_conn()
+    now = dt.datetime.utcnow()
+    lower = (now + dt.timedelta(hours=hours_before - 1)).isoformat()
+    upper = (now + dt.timedelta(hours=hours_before + 1)).isoformat()
+    rows = conn.execute(
+        "SELECT * FROM users WHERE is_banned=0 AND sub_expires BETWEEN ? AND ?",
+        (lower, upper)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_users_not_connected(hours_after: int):
+    """Возвращает пользователей, оформивших подписку (hours_after±1) ч назад, без подключённых устройств."""
+    import datetime as dt
+    conn = get_conn()
+    now = dt.datetime.utcnow()
+    lower = (now - dt.timedelta(hours=hours_after + 1)).isoformat()
+    upper = (now - dt.timedelta(hours=hours_after - 1)).isoformat()
+    rows = conn.execute(
+        """SELECT u.user_id, u.is_banned, s.started_at FROM users u
+           JOIN subscriptions s ON s.user_id = u.user_id
+           WHERE u.is_banned = 0
+           AND s.started_at BETWEEN ? AND ?
+           AND NOT EXISTS (SELECT 1 FROM vpn_devices d WHERE d.user_id = u.user_id)
+           GROUP BY u.user_id""",
+        (lower, upper)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def check_notification_sent(user_id, notif_key):
+    """Возвращает True, если уведомление уже было отправлено."""
+    conn = get_conn()
+    r = conn.execute(
+        "SELECT 1 FROM notifications_sent WHERE user_id=? AND notif_key=?",
+        (str(user_id), notif_key)
+    ).fetchone()
+    conn.close()
+    return r is not None
+
+
+def mark_notification_sent(user_id, notif_key):
+    """Помечает уведомление как отправленное."""
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR IGNORE INTO notifications_sent (user_id, notif_key) VALUES (?,?)",
+        (str(user_id), notif_key)
+    )
     conn.commit()
     conn.close()

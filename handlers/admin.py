@@ -36,6 +36,10 @@ class AdminStates(StatesGroup):
     wait_for_dev_emoji = State()  # Эмодзи кнопок устройств
     wait_for_pay_emoji = State()  # Эмодзи кнопок оплаты
     wait_for_kb_emoji = State()   # Эмодзи кнопок главного меню  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
+    wait_for_info_vpn_emoji = State()  # Эмодзи кнопок Инфо и VPN
+    wait_for_notif_text = State()     # Текст уведомления
+    wait_for_notif_btn_text = State() # Текст кнопки уведомления
+    wait_for_notif_hours = State()    # Часы для уведомления
 
 def admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -51,6 +55,8 @@ def admin_kb():
         [InlineKeyboardButton(text="⌨️ Эмодзи главного меню", callback_data="admin_kb_emoji")],
         [InlineKeyboardButton(text="🔢 Эмодзи кнопок устройств", callback_data="admin_dev_emoji")],
         [InlineKeyboardButton(text="💳 Эмодзи кнопок оплаты", callback_data="admin_pay_emoji")],
+        [InlineKeyboardButton(text="🔔 Эмодзи кнопок Инфо и VPN", callback_data="admin_info_vpn_emoji")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="admin_notifications")],
         [InlineKeyboardButton(text="🖼 Изменить GIF", callback_data="admin_edit_gif"),
          InlineKeyboardButton(text="🎭 Стикер на старте", callback_data="admin_edit_sticker")],
     ])
@@ -747,7 +753,259 @@ async def save_dev_emoji(m: Message, state: FSMContext):
     await state.clear()
 
 
-# ─── ПЛАТЁЖНЫЕ СИСТЕМЫ ────────────────────────────────────────────────────────
+# ─── ЭМОДЗИ КНОПОК ИНФО И АКТИВНОГО VPN ──────────────────────────────────────
+
+INFO_VPN_EMOJI_MAP = {
+    "btn_info_agree_emoji":   ("📄", "📄 Соглашение (Инфо)",             "btn_info_agree_emoji_id"),
+    "btn_info_privacy_emoji": ("🔒", "🔒 Конфиденциальность (Инфо)",     "btn_info_privacy_emoji_id"),
+    "btn_info_refund_emoji":  ("💰", "💰 Возврат (Инфо)",                "btn_info_refund_emoji_id"),
+    "btn_info_support_emoji": ("🛠", "🛠 Поддержка (Инфо)",              "btn_info_support_emoji_id"),
+    "btn_info_channel_emoji": ("📢", "📢 Канал (Инфо)",                   "btn_info_channel_emoji_id"),
+    "btn_info_install_emoji": ("📲", "📲 Инструкция (Инфо)",             "btn_info_install_emoji_id"),
+    "btn_install_vpn_emoji":  ("📲", "📲 Установить VPN (Активный VPN)", "btn_install_vpn_emoji_id"),
+    "btn_devices_emoji":      ("📱", "📱 Устройства (Активный VPN)",     "btn_devices_emoji_id"),
+    "btn_renew_emoji":        ("🔄", "🔄 Продлить (Активный VPN)",       "btn_renew_emoji_id"),
+}
+
+
+@admin_router.callback_query(F.data == "admin_info_vpn_emoji", F.from_user.id.in_(ADMIN_IDS))
+async def admin_info_vpn_emoji_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    kb = []
+    for key, (default, label, id_key) in INFO_VPN_EMOJI_MAP.items():
+        cur_emoji = s.get(key, default)
+        cur_id = s.get(id_key, "0")
+        id_str = f"✅ кастом. ID:{cur_id}" if cur_id and cur_id != "0" else "стандарт"
+        kb.append([InlineKeyboardButton(
+            text=f"{label}  →  {cur_emoji} ({id_str})",
+            callback_data=f"setivpe_{key}"
+        )])
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
+    await c.message.edit_text(
+        "🔔 <b>Эмодзи кнопок Инфо и Активного VPN</b>\n\n"
+        "Для каждой кнопки можно задать:\n"
+        "• <b>Эмодзи</b> — любой юникод символ (отображается в тексте кнопки)\n"
+        "• <b>ID кастомного эмодзи</b> (Premium) — для анимированного\n\n"
+        "💡 Кнопки Инфо отображаются в разделе «Информация».\n"
+        "Кнопки Активный VPN — в экране с активной подпиской.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+@admin_router.callback_query(F.data.startswith("setivpe_"), F.from_user.id.in_(ADMIN_IDS))
+async def set_info_vpn_emoji_req(c: CallbackQuery, state: FSMContext):
+    key = c.data.replace("setivpe_", "")
+    default, label, id_key = INFO_VPN_EMOJI_MAP.get(key, ("", key, ""))
+    await state.update_data(ivp_emoji_key=key, ivp_emoji_id_key=id_key, ivp_emoji_default=default)
+    s = get_bot_settings()
+    cur_e = s.get(key, default)
+    cur_id = s.get(id_key, "0")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="😀 Изменить эмодзи (символ)", callback_data="ivpemoji_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="ivpemoji_id")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_info_vpn_emoji")],
+    ])
+    await c.message.edit_text(
+        f"🔧 <b>Кнопка: {label}</b>\n\n"
+        f"Текущий эмодзи: {cur_e}\n"
+        f"Кастомный ID: <code>{cur_id}</code>",
+        reply_markup=kb
+    )
+
+
+@admin_router.callback_query(F.data == "ivpemoji_char", F.from_user.id.in_(ADMIN_IDS))
+async def ivpemoji_char_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите новый эмодзи-символ (например 📲) или «0» для сброса:")
+    await state.set_state(AdminStates.wait_for_info_vpn_emoji)
+    await state.update_data(ivp_save_mode="char")
+    await c.answer()
+
+
+@admin_router.callback_query(F.data == "ivpemoji_id", F.from_user.id.in_(ADMIN_IDS))
+async def ivpemoji_id_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:")
+    await state.set_state(AdminStates.wait_for_info_vpn_emoji)
+    await state.update_data(ivp_save_mode="id")
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_info_vpn_emoji)
+async def save_info_vpn_emoji(m: Message, state: FSMContext):
+    d = await state.get_data()
+    mode    = d.get("ivp_save_mode", "char")
+    key     = d.get("ivp_emoji_key", "")
+    id_key  = d.get("ivp_emoji_id_key", "")
+    default = d.get("ivp_emoji_default", "")
+
+    if mode == "char":
+        val = default if m.text.strip() == "0" else m.text.strip()
+        set_bot_setting(key, val)
+        await m.answer(f"✅ Эмодзи обновлён: {val}")
+    else:
+        val = "0" if m.text.strip() == "0" else m.text.strip()
+        set_bot_setting(id_key, val)
+        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+    await state.clear()
+
+
+# ─── УВЕДОМЛЕНИЯ ──────────────────────────────────────────────────────────────
+
+_NOTIF_DEFAULTS = {
+    "expiry": {
+        "enabled_key": "notif_expiry_enabled",
+        "text_key":    "notif_expiry_text",
+        "btn_key":     "notif_expiry_btn",
+        "hours_key":   "notif_expiry_hours",
+        "label":       "⚠️ Подписка истекает",
+        "default_text": (
+            "⚠️ Завтра закончится ваша подписка на Anonch VPN\n\n"
+            "Автоматического продления нет! Чтобы не остаться без связи, "
+            "продлите свою подписку в разделе /profile"
+        ),
+        "default_btn":   "📋 Перейти к продлению",
+        "default_hours": "24",
+    },
+    "noconn": {
+        "enabled_key": "notif_noconn_enabled",
+        "text_key":    "notif_noconn_text",
+        "btn_key":     "notif_noconn_btn",
+        "hours_key":   "notif_noconn_hours",
+        "label":       "🤖 Не подключился",
+        "default_text": (
+            "🤖 Мы заметили, что вы еще не подключились\n\n"
+            "Если возникли сложности — напишите в поддержку. Мы всегда готовы помочь!"
+        ),
+        "default_btn":   "Подключиться",
+        "default_hours": "2",
+    },
+}
+
+
+def _notif_kb(s):
+    """Строит клавиатуру для панели уведомлений."""
+    kb = []
+    for ntype, cfg in _NOTIF_DEFAULTS.items():
+        enabled = s.get(cfg["enabled_key"], "1") == "1"
+        status = "✅ Вкл" if enabled else "❌ Выкл"
+        hours = s.get(cfg["hours_key"], cfg["default_hours"])
+        hours_label = f"за {hours}ч" if ntype == "expiry" else f"через {hours}ч"
+        kb.append([InlineKeyboardButton(
+            text=f"{cfg['label']} ({hours_label}) — {status}",
+            callback_data=f"notif_toggle_{ntype}"
+        )])
+        kb.append([
+            InlineKeyboardButton(text="✏️ Текст", callback_data=f"notif_edit_{ntype}_text"),
+            InlineKeyboardButton(text="📋 Кнопка", callback_data=f"notif_edit_{ntype}_btn"),
+            InlineKeyboardButton(text="⏰ Часы", callback_data=f"notif_edit_{ntype}_hours"),
+        ])
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@admin_router.callback_query(F.data == "admin_notifications", F.from_user.id.in_(ADMIN_IDS))
+async def admin_notifications_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    lines = ["🔔 <b>Управление уведомлениями</b>\n"]
+    for ntype, cfg in _NOTIF_DEFAULTS.items():
+        enabled = s.get(cfg["enabled_key"], "1") == "1"
+        hours = s.get(cfg["hours_key"], cfg["default_hours"])
+        hours_label = f"за {hours}ч до истечения" if ntype == "expiry" else f"через {hours}ч после активации"
+        text_preview = s.get(cfg["text_key"], cfg["default_text"])[:60] + "..."
+        lines.append(
+            f"<b>{cfg['label']}</b>\n"
+            f"Статус: {'✅ Включено' if enabled else '❌ Выключено'} | Отправка: {hours_label}\n"
+            f"Текст: {text_preview}\n"
+        )
+    await c.message.edit_text("\n".join(lines), reply_markup=_notif_kb(s))
+
+
+@admin_router.callback_query(F.data.startswith("notif_toggle_"), F.from_user.id.in_(ADMIN_IDS))
+async def notif_toggle(c: CallbackQuery):
+    ntype = c.data.replace("notif_toggle_", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype)
+    if not cfg:
+        return await c.answer("Неизвестный тип")
+    s = get_bot_settings()
+    current = s.get(cfg["enabled_key"], "1")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting(cfg["enabled_key"], new_val)
+    await c.answer("✅ Включено" if new_val == "1" else "❌ Выключено")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_notif_kb(s))
+
+
+@admin_router.callback_query(F.data.startswith("notif_edit_"), F.from_user.id.in_(ADMIN_IDS))
+async def notif_edit_req(c: CallbackQuery, state: FSMContext):
+    parts = c.data.split("_")  # notif_edit_<type>_<field>
+    ntype = parts[2]
+    field = parts[3]
+    cfg = _NOTIF_DEFAULTS.get(ntype)
+    if not cfg:
+        return await c.answer("Неизвестный тип")
+    await state.update_data(notif_type=ntype, notif_field=field)
+    s = get_bot_settings()
+    if field == "text":
+        cur = s.get(cfg["text_key"], cfg["default_text"])
+        await c.message.answer(
+            f"✏️ <b>Текст уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущий текст:\n{cur}\n\n"
+            "Введите новый текст (HTML поддерживается):"
+        )
+        await state.set_state(AdminStates.wait_for_notif_text)
+    elif field == "btn":
+        cur = s.get(cfg["btn_key"], cfg["default_btn"])
+        await c.message.answer(
+            f"📋 <b>Текст кнопки уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущий текст кнопки: <b>{cur}</b>\n\n"
+            "Введите новый текст кнопки:"
+        )
+        await state.set_state(AdminStates.wait_for_notif_btn_text)
+    elif field == "hours":
+        cur = s.get(cfg["hours_key"], cfg["default_hours"])
+        hint = "до истечения подписки" if ntype == "expiry" else "после активации подписки"
+        await c.message.answer(
+            f"⏰ <b>Часы отправки уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущее значение: <b>{cur}ч</b> ({hint})\n\n"
+            "Введите новое количество часов (целое число):"
+        )
+        await state.set_state(AdminStates.wait_for_notif_hours)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_notif_text)
+async def save_notif_text(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    set_bot_setting(cfg.get("text_key", ""), m.html_text.strip())
+    await m.answer("✅ Текст уведомления обновлён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_btn_text)
+async def save_notif_btn_text(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    set_bot_setting(cfg.get("btn_key", ""), m.text.strip())
+    await m.answer("✅ Текст кнопки уведомления обновлён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_hours)
+async def save_notif_hours(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    try:
+        val = int(m.text.strip())
+        if val < 1:
+            raise ValueError
+        set_bot_setting(cfg.get("hours_key", ""), str(val))
+        await m.answer(f"✅ Часы обновлены: {val}ч")
+        await state.clear()
+    except (ValueError, TypeError):
+        await m.answer("❌ Введите целое положительное число!")
 
 @admin_router.callback_query(F.data == "admin_payments", F.from_user.id.in_(ADMIN_IDS))
 async def admin_payments_menu(c: CallbackQuery):
