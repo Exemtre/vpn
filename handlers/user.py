@@ -72,6 +72,21 @@ def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
     return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, url=url)
 
 
+def _build_dual_emoji_btn(s, label, char_key, default_char, id_key, url=None, cb=None):
+    """Build an InlineKeyboardButton using separate char and custom-emoji-ID settings."""
+    e = s.get(char_key, default_char)
+    eid = s.get(id_key, "0")
+    txt = f"{e} {label}" if e else label
+    if url:
+        if _is_valid_emoji_id(eid):
+            return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
+        return InlineKeyboardButton(text=txt, url=url)
+    else:
+        if _is_valid_emoji_id(eid):
+            return InlineKeyboardButton(text=txt, callback_data=cb, icon_custom_emoji_id=str(eid))
+        return InlineKeyboardButton(text=txt, callback_data=cb)
+
+
 def main_menu_kb():
     s = get_bot_settings()
     vpn_id = s.get("kb_vpn_emoji_id", "0")
@@ -101,27 +116,13 @@ def profile_kb():
 def active_vpn_kb():
     s = get_bot_settings()
     install_url = s.get("info_install_url", "")
-
-    def _build_button_with_emoji(label, emoji_setting_key, default_emoji, emoji_id_setting_key, url=None, callback_data=None):
-        e = s.get(emoji_setting_key, default_emoji)
-        eid = s.get(emoji_id_setting_key, "0")
-        txt = f"{e} {label}" if e else label
-        if url:
-            if _is_valid_emoji_id(eid):
-                return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
-            return InlineKeyboardButton(text=txt, url=url)
-        else:
-            if _is_valid_emoji_id(eid):
-                return InlineKeyboardButton(text=txt, callback_data=callback_data, icon_custom_emoji_id=str(eid))
-            return InlineKeyboardButton(text=txt, callback_data=callback_data)
-
     rows = []
     if install_url:
-        rows.append([_build_button_with_emoji("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
+        rows.append([_build_dual_emoji_btn(s, "Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
     else:
-        rows.append([_build_button_with_emoji("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", callback_data="install_vpn_stub")])
-    rows.append([_build_button_with_emoji("Подключённые устройства", "btn_devices_emoji", "📱", "btn_devices_emoji_id", callback_data="connected_devices")])
-    rows.append([_build_button_with_emoji("Продлить подписку", "btn_renew_emoji", "🔄", "btn_renew_emoji_id", callback_data="renew_sub")])
+        rows.append([_build_dual_emoji_btn(s, "Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", cb="install_vpn_stub")])
+    rows.append([_build_dual_emoji_btn(s, "Подключённые устройства", "btn_devices_emoji", "📱", "btn_devices_emoji_id", cb="connected_devices")])
+    rows.append([_build_dual_emoji_btn(s, "Продлить подписку", "btn_renew_emoji", "🔄", "btn_renew_emoji_id", cb="renew_sub")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -131,13 +132,13 @@ def payment_success_kb():
     support_url = s.get("info_support_url", "")
     rows = []
     if install_url:
-        rows.append([make_url_btn("btn_install_vpn", "Установить VPN", install_url, "btn_install_vpn_emoji", "📲")])
+        rows.append([_build_dual_emoji_btn(s, "Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
     else:
-        rows.append([make_btn("btn_install_vpn", "Установить VPN", "install_vpn_stub", "btn_install_vpn_emoji", "📲")])
+        rows.append([_build_dual_emoji_btn(s, "Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", cb="install_vpn_stub")])
     if support_url:
-        rows.append([make_url_btn("btn_supp", "Техническая поддержка", support_url, "btn_supp_emoji", "🛠")])
+        rows.append([_build_dual_emoji_btn(s, "Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", url=support_url)])
     else:
-        rows.append([make_btn("btn_supp", "Техническая поддержка", "support_stub", "btn_supp_emoji", "🛠")])
+        rows.append([_build_dual_emoji_btn(s, "Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", cb="support_stub")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -279,6 +280,7 @@ async def cmd_start(message: Message):
     if gif:
         try:
             await message.answer_animation(animation=gif, caption=text, reply_markup=main_menu_kb())
+            await message.answer("📌 Главное меню:", reply_markup=get_main_reply_kb(message.from_user.id))
             return
         except:
             pass
@@ -368,39 +370,26 @@ async def info_reply(m: Message):
     support_url = s.get("info_support_url", "")
     install_url = s.get("info_install_url", "")
 
-    def _build_info_button(label, emoji_setting_key, default_emoji, emoji_id_setting_key, url=None, cb=None):
-        e = s.get(emoji_setting_key, default_emoji)
-        eid = s.get(emoji_id_setting_key, "0")
-        txt = f"{e} {label}" if e else label
-        if url:
-            if _is_valid_emoji_id(eid):
-                return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
-            return InlineKeyboardButton(text=txt, url=url)
-        else:
-            if _is_valid_emoji_id(eid):
-                return InlineKeyboardButton(text=txt, callback_data=cb, icon_custom_emoji_id=str(eid))
-            return InlineKeyboardButton(text=txt, callback_data=cb)
-
     kb_rows = []
     if agree_url:
-        kb_rows.append([_build_info_button("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", url=agree_url)])
+        kb_rows.append([_build_dual_emoji_btn(s, "Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", url=agree_url)])
     else:
-        kb_rows.append([_build_info_button("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", cb="agree_stub")])
+        kb_rows.append([_build_dual_emoji_btn(s, "Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", cb="agree_stub")])
     if privacy_url:
-        kb_rows.append([_build_info_button("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", url=privacy_url)])
+        kb_rows.append([_build_dual_emoji_btn(s, "Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", url=privacy_url)])
     else:
-        kb_rows.append([_build_info_button("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", cb="info_stub")])
+        kb_rows.append([_build_dual_emoji_btn(s, "Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", cb="info_stub")])
     if refund_url:
-        kb_rows.append([_build_info_button("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", url=refund_url)])
+        kb_rows.append([_build_dual_emoji_btn(s, "Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", url=refund_url)])
     else:
-        kb_rows.append([_build_info_button("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", cb="info_stub")])
+        kb_rows.append([_build_dual_emoji_btn(s, "Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", cb="info_stub")])
     if support_url:
-        kb_rows.append([_build_info_button("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", url=support_url)])
+        kb_rows.append([_build_dual_emoji_btn(s, "Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", url=support_url)])
     else:
-        kb_rows.append([_build_info_button("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", cb="support_stub")])
+        kb_rows.append([_build_dual_emoji_btn(s, "Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", cb="support_stub")])
     if install_url:
-        kb_rows.append([_build_info_button("Инструкция по установке", "btn_info_install_emoji", "📲", "btn_info_install_emoji_id", url=install_url)])
-    kb_rows.append([_build_info_button("Канал", "btn_info_channel_emoji", "📢", "btn_info_channel_emoji_id", url=channel)])
+        kb_rows.append([_build_dual_emoji_btn(s, "Инструкция по установке", "btn_info_install_emoji", "📲", "btn_info_install_emoji_id", url=install_url)])
+    kb_rows.append([_build_dual_emoji_btn(s, "Канал", "btn_info_channel_emoji", "📢", "btn_info_channel_emoji_id", url=channel)])
     await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
 
 
