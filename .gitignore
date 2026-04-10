@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+database.db
+vpn_bot.db
+.idea/
+VPN.zip
+*.db
