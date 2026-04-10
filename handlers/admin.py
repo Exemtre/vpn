@@ -1321,6 +1321,11 @@ async def adm_gif_sv(m: Message, state: FSMContext):
     await state.clear()
 
 
+@admin_router.message(AdminStates.wait_for_gif, F.text.startswith("/"))
+async def adm_gif_cmd(m: Message, state: FSMContext):
+    await state.clear()
+
+
 @admin_router.message(AdminStates.wait_for_gif)
 async def adm_gif_wrong(m: Message, state: FSMContext):
     await m.answer("❌ Это не GIF! Отправьте анимацию.")
@@ -1350,6 +1355,11 @@ async def adm_sticker_sv(m: Message, state: FSMContext):
 async def adm_sticker_clear(m: Message, state: FSMContext):
     set_bot_setting("start_sticker_id", "")
     await m.answer("✅ Стикер отключён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_sticker, F.text.startswith("/"))
+async def adm_sticker_cmd(m: Message, state: FSMContext):
     await state.clear()
 
 

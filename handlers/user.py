@@ -73,18 +73,21 @@ def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
 
 
 def _build_dual_emoji_btn(s, label, char_key, default_char, id_key, url=None, cb=None):
-    """Build an InlineKeyboardButton using separate char and custom-emoji-ID settings."""
-    e = s.get(char_key, default_char)
+    """Build an InlineKeyboardButton using separate char and custom-emoji-ID settings.
+    When a valid custom emoji ID is present the text contains no char prefix so the
+    icon_custom_emoji_id is the only emoji shown.  Otherwise the plain char is prepended.
+    """
     eid = s.get(id_key, "0")
+    if _is_valid_emoji_id(eid):
+        # Custom emoji replaces the char — use plain label as text
+        if url:
+            return InlineKeyboardButton(text=label, url=url, icon_custom_emoji_id=str(eid))
+        return InlineKeyboardButton(text=label, callback_data=cb, icon_custom_emoji_id=str(eid))
+    e = s.get(char_key, default_char)
     txt = f"{e} {label}" if e else label
     if url:
-        if _is_valid_emoji_id(eid):
-            return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
         return InlineKeyboardButton(text=txt, url=url)
-    else:
-        if _is_valid_emoji_id(eid):
-            return InlineKeyboardButton(text=txt, callback_data=cb, icon_custom_emoji_id=str(eid))
-        return InlineKeyboardButton(text=txt, callback_data=cb)
+    return InlineKeyboardButton(text=txt, callback_data=cb)
 
 
 def main_menu_kb():
@@ -280,13 +283,13 @@ async def cmd_start(message: Message):
     if gif:
         try:
             await message.answer_animation(animation=gif, caption=text, reply_markup=main_menu_kb())
-            await message.answer("📌 Главное меню:", reply_markup=get_main_reply_kb(message.from_user.id))
+            await message.answer("⠀", reply_markup=get_main_reply_kb(message.from_user.id))
             return
         except:
             pass
 
     await message.answer(text, reply_markup=get_main_reply_kb(message.from_user.id))
-    await message.answer("📌 Главное меню:", reply_markup=main_menu_kb())
+    await message.answer("⠀", reply_markup=main_menu_kb())
 
 
 @user_router.message(F.text.endswith("Подключить VPN"))
