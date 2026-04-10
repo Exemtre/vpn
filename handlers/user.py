@@ -61,9 +61,11 @@ async def _send_forced_sub_message(user_id: int, bot):
     text = s.get("forced_sub_text",
                  "🔒 Для использования бота необходимо подписаться на наш канал.")
     channel_url = channel if channel.startswith("http") else f"https://t.me/{channel.lstrip('@')}"
+    sub_e = ce(s.get("ge_forced_sub_btn", "0"), "📢")
+    check_e = ce(s.get("ge_forced_sub_check_btn", "0"), "✅")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Подписаться", url=channel_url)],
-        [InlineKeyboardButton(text="✅ Я подписался", callback_data="forced_sub_check")],
+        [InlineKeyboardButton(text=f"{sub_e} Подписаться", url=channel_url)],
+        [InlineKeyboardButton(text=f"{check_e} Я подписался", callback_data="forced_sub_check")],
     ])
     await bot.send_message(user_id, text, reply_markup=kb)
 
@@ -205,7 +207,7 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "")
     vpn_link = plan.get('vpn_link', '')
     if vpn_link and vpn_link != 'Ссылка не задана':
         text += f"\n{e_sub} <b>Ваша подписка AnonchVPN</b>\n"
-        text += f"├ Статус: {e_status} Активна ✅\n"
+        text += f"├ Статус: {e_status} Активна\n"
         text += f"└ Оплачена до: {exp_date}\n\n"
         text += f"{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>\n\n"
 
@@ -245,7 +247,7 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
     e_hint = ce(s.get("ge_active_hint", "0"), "💡")
 
     title_tpl = s.get("active_vpn_title",
-                      "{e_sub} <b>Ваша подписка AnonchVPN</b>\n├ Статус: {e_status} Активна ✅\n└ Оплачена до: <b>{exp}</b>")
+                      "{e_sub} <b>Ваша подписка AnonchVPN</b>\n├ Статус: {e_status} Активна\n└ Оплачена до: <b>{exp}</b>")
     title = title_tpl.replace("{e_sub}", e_sub).replace("{e_status}", e_status).replace("{exp}", exp)
 
     vpn_link = p.get('vpn_link', '')
@@ -1112,11 +1114,24 @@ async def forced_sub_check_cb(c: CallbackQuery):
             pass
         s = get_bot_settings()
         gif = s.get("start_media_id")
+        sticker = s.get("start_sticker_id")
         text = s.get("start_text", "<b>🔐 Добро пожаловать в AnonchVPN!</b>\n\nЯ — ваш помощник в мире интернет-свободы!")
+
+        if sticker:
+            try:
+                await c.bot.send_sticker(c.from_user.id, sticker)
+            except:
+                pass
+
         if gif:
             gif_sent = False
             try:
-                await c.bot.send_message(c.from_user.id, text, reply_markup=main_menu_kb())
+                await c.bot.send_animation(
+                    chat_id=c.from_user.id,
+                    animation=gif,
+                    caption=text,
+                    reply_markup=main_menu_kb()
+                )
                 gif_sent = True
             except:
                 pass
@@ -1127,6 +1142,7 @@ async def forced_sub_check_cb(c: CallbackQuery):
                     pass
                 await c.answer("✅ Добро пожаловать!")
                 return
+
         await c.bot.send_message(c.from_user.id, text, reply_markup=get_main_reply_kb(c.from_user.id))
         await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=main_menu_kb())
         await c.answer("✅ Добро пожаловать!")
