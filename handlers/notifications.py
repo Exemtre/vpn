@@ -24,6 +24,18 @@ _NOCONN_DEFAULT_TEXT = (
 NOTIFICATION_CHECK_INTERVAL = 3600  # seconds between scheduler runs
 
 
+def _is_valid_emoji_id(eid):
+    """Returns True only when eid is a non-zero numeric string (valid custom emoji ID)."""
+    return bool(eid and str(eid).strip().isdigit() and str(eid).strip() != "0")
+
+
+def _make_notif_btn(text, callback_data, emoji_id):
+    """Creates an InlineKeyboardButton for a notification, using custom emoji if valid."""
+    if _is_valid_emoji_id(emoji_id):
+        return InlineKeyboardButton(text=text, callback_data=callback_data, icon_custom_emoji_id=str(emoji_id))
+    return InlineKeyboardButton(text=text, callback_data=callback_data)
+
+
 async def check_and_send_notifications(bot):
     s = get_bot_settings()
 
@@ -35,6 +47,7 @@ async def check_and_send_notifications(bot):
             hours = 24
         text = s.get("notif_expiry_text", _EXPIRY_DEFAULT_TEXT)
         btn_text = s.get("notif_expiry_btn", "📋 Перейти к продлению")
+        btn_emoji_id = s.get("notif_expiry_btn_emoji_id", "0")
 
         users = get_users_expiring_soon(hours)
         for user in users:
@@ -45,7 +58,7 @@ async def check_and_send_notifications(bot):
                 continue
             try:
                 kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=btn_text, callback_data="manage_vpn")]
+                    [_make_notif_btn(btn_text, "manage_vpn", btn_emoji_id)]
                 ])
                 await bot.send_message(user_id, text, reply_markup=kb)
                 mark_notification_sent(user_id, notif_key)
@@ -60,6 +73,7 @@ async def check_and_send_notifications(bot):
             hours = 2
         text = s.get("notif_noconn_text", _NOCONN_DEFAULT_TEXT)
         btn_text = s.get("notif_noconn_btn", "Подключиться")
+        btn_emoji_id = s.get("notif_noconn_btn_emoji_id", "0")
         support_url = s.get("info_support_url", "")
 
         users = get_users_not_connected(hours)
@@ -73,7 +87,7 @@ async def check_and_send_notifications(bot):
                 kb_rows = []
                 if support_url:
                     kb_rows.append([InlineKeyboardButton(text="СВЯЗАТЬСЯ", url=support_url)])
-                kb_rows.append([InlineKeyboardButton(text=btn_text, callback_data="manage_vpn")])
+                kb_rows.append([_make_notif_btn(btn_text, "manage_vpn", btn_emoji_id)])
                 kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
                 await bot.send_message(user_id, text, reply_markup=kb)
                 mark_notification_sent(user_id, notif_key)

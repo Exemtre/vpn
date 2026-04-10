@@ -40,6 +40,7 @@ class AdminStates(StatesGroup):
     wait_for_notif_text = State()     # Текст уведомления
     wait_for_notif_btn_text = State() # Текст кнопки уведомления
     wait_for_notif_hours = State()    # Часы для уведомления
+    wait_for_notif_btn_emoji = State() # ID кастомного эмодзи кнопки уведомления
 
 def admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -462,9 +463,16 @@ async def bs_t(m: Message, state: FSMContext):
 async def bs_e(m: Message, state: FSMContext):
     d = await state.get_data()
     _, ek = BTN_MAPPING.get(d['editing_btn'], ("", f"btn_{d['editing_btn']}_emoji"))
-    val = "0" if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(ek, val)
-    await m.answer("✅ Эмодзи обновлён!")
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(ek, "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        set_bot_setting(ek, val)
+        await m.answer("✅ Эмодзи обновлён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
     await state.clear()
 
 
@@ -517,9 +525,16 @@ async def set_global_emoji(c: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_global_emoji)
 async def save_global_emoji(m: Message, state: FSMContext):
     d = await state.get_data()
-    val = "0" if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(d['ge_key'], val)
-    await m.answer("✅ Эмодзи сохранён!")
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(d['ge_key'], "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        set_bot_setting(d['ge_key'], val)
+        await m.answer("✅ Эмодзи сохранён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
     await state.clear()
 
 
@@ -580,9 +595,12 @@ async def save_kb_emoji(m: Message, state: FSMContext):
 # ─── ЭМОДЗИ КНОПОК ОПЛАТЫ ─────────────────────────────────────────────────────
 
 PAY_EMOJI_MAP = {
-    "kb_pay_stars_emoji":  ("⭐️", "⭐️ Telegram Stars",  "kb_pay_stars_id"),
-    "kb_pay_yoo_emoji":    ("💛", "💛 ЮMoney",           "kb_pay_yoo_id"),
-    "kb_pay_crypto_emoji": ("💎", "💎 CryptoBot",        "kb_pay_crypto_id"),
+    "kb_pay_stars_emoji":      ("⭐️", "⭐️ Telegram Stars (выбор тарифа)",   "kb_pay_stars_id"),
+    "kb_pay_yoo_emoji":        ("💛", "💛 ЮMoney (выбор тарифа)",           "kb_pay_yoo_id"),
+    "kb_pay_crypto_emoji":     ("💎", "💎 CryptoBot (выбор тарифа)",        "kb_pay_crypto_id"),
+    "pay_btn_crypto_pay_emoji":("💎", "💎 Оплатить через CryptoBot",        "pay_btn_crypto_pay_id"),
+    "pay_btn_yoo_pay_emoji":   ("💛", "💛 Оплатить через ЮMoney",           "pay_btn_yoo_pay_id"),
+    "pay_btn_paid_emoji":      ("✅", "✅ Я оплатил",                       "pay_btn_paid_id"),
 }
 
 
@@ -659,9 +677,16 @@ async def save_pay_emoji(m: Message, state: FSMContext):
         set_bot_setting(key, val)
         await m.answer(f"✅ Эмодзи обновлён: {val}")
     else:
-        val = "0" if m.text.strip() == "0" else m.text.strip()
-        set_bot_setting(id_key, val)
-        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -747,9 +772,16 @@ async def save_dev_emoji(m: Message, state: FSMContext):
         set_bot_setting(key, val)
         await m.answer(f"✅ Эмодзи обновлён: {val}")
     else:
-        val = "0" if m.text.strip() == "0" else m.text.strip()
-        set_bot_setting(id_key, val)
-        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -842,9 +874,16 @@ async def save_info_vpn_emoji(m: Message, state: FSMContext):
         set_bot_setting(key, val)
         await m.answer(f"✅ Эмодзи обновлён: {val}")
     else:
-        val = "0" if m.text.strip() == "0" else m.text.strip()
-        set_bot_setting(id_key, val)
-        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -856,6 +895,7 @@ _NOTIF_DEFAULTS = {
         "text_key":    "notif_expiry_text",
         "btn_key":     "notif_expiry_btn",
         "hours_key":   "notif_expiry_hours",
+        "btn_emoji_key": "notif_expiry_btn_emoji_id",
         "label":       "⚠️ Подписка истекает",
         "default_text": (
             "⚠️ Завтра закончится ваша подписка на Anonch VPN\n\n"
@@ -870,6 +910,7 @@ _NOTIF_DEFAULTS = {
         "text_key":    "notif_noconn_text",
         "btn_key":     "notif_noconn_btn",
         "hours_key":   "notif_noconn_hours",
+        "btn_emoji_key": "notif_noconn_btn_emoji_id",
         "label":       "🤖 Не подключился",
         "default_text": (
             "🤖 Мы заметили, что вы еще не подключились\n\n"
@@ -889,6 +930,8 @@ def _notif_kb(s):
         status = "✅ Вкл" if enabled else "❌ Выкл"
         hours = s.get(cfg["hours_key"], cfg["default_hours"])
         hours_label = f"за {hours}ч" if ntype == "expiry" else f"через {hours}ч"
+        emoji_id = s.get(cfg["btn_emoji_key"], "0")
+        emoji_str = f"✅ ID:{emoji_id}" if emoji_id and emoji_id != "0" else "❌ Не задан"
         kb.append([InlineKeyboardButton(
             text=f"{cfg['label']} ({hours_label}) — {status}",
             callback_data=f"notif_toggle_{ntype}"
@@ -897,6 +940,12 @@ def _notif_kb(s):
             InlineKeyboardButton(text="✏️ Текст", callback_data=f"notif_edit_{ntype}_text"),
             InlineKeyboardButton(text="📋 Кнопка", callback_data=f"notif_edit_{ntype}_btn"),
             InlineKeyboardButton(text="⏰ Часы", callback_data=f"notif_edit_{ntype}_hours"),
+        ])
+        kb.append([
+            InlineKeyboardButton(
+                text=f"🎭 Эмодзи кнопки: {emoji_str}",
+                callback_data=f"notif_edit_{ntype}_btn_emoji"
+            ),
         ])
     kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -969,6 +1018,15 @@ async def notif_edit_req(c: CallbackQuery, state: FSMContext):
             "Введите новое количество часов (целое число):"
         )
         await state.set_state(AdminStates.wait_for_notif_hours)
+    elif field == "btn_emoji":
+        cur = s.get(cfg["btn_emoji_key"], "0")
+        cur_str = f"<code>{cur}</code>" if cur and cur != "0" else "❌ Не задан"
+        await c.message.answer(
+            f"🎭 <b>Кастомный эмодзи кнопки «{cfg['label']}»</b>\n\n"
+            f"Текущий ID: {cur_str}\n\n"
+            "Введите ID кастомного эмодзи (число) или «0» для сброса:"
+        )
+        await state.set_state(AdminStates.wait_for_notif_btn_emoji)
     await c.answer()
 
 
@@ -989,6 +1047,24 @@ async def save_notif_btn_text(m: Message, state: FSMContext):
     cfg = _NOTIF_DEFAULTS.get(ntype, {})
     set_bot_setting(cfg.get("btn_key", ""), m.text.strip())
     await m.answer("✅ Текст кнопки уведомления обновлён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_btn_emoji)
+async def save_notif_btn_emoji(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(cfg.get("btn_emoji_key", ""), "0")
+        await m.answer("✅ Эмодзи кнопки сброшен.")
+    elif val.isdigit():
+        set_bot_setting(cfg.get("btn_emoji_key", ""), val)
+        await m.answer("✅ Эмодзи кнопки уведомления обновлён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
     await state.clear()
 
 

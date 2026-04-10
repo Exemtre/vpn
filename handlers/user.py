@@ -34,6 +34,11 @@ def ce(emoji_id, fallback):
     return fallback
 
 
+def _is_valid_emoji_id(eid):
+    """Returns True only when eid is a non-zero numeric string (valid custom emoji ID)."""
+    return bool(eid and str(eid).strip().isdigit() and str(eid).strip() != "0")
+
+
 def get_main_reply_kb(user_id: int):
     s = get_bot_settings()
     vpn_e = s.get("kb_vpn_emoji", "⚡️")
@@ -53,7 +58,7 @@ def make_btn(text_key, default_text, cb_data, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
     eid = s.get(emoji_key, "0")
-    if eid and eid != "0" and str(eid).strip():
+    if _is_valid_emoji_id(eid):
         return InlineKeyboardButton(text=text, callback_data=cb_data, icon_custom_emoji_id=str(eid))
     return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, callback_data=cb_data)
 
@@ -62,7 +67,7 @@ def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
     eid = s.get(emoji_key, "0")
-    if eid and eid != "0" and str(eid).strip():
+    if _is_valid_emoji_id(eid):
         return InlineKeyboardButton(text=text, url=url, icon_custom_emoji_id=str(eid))
     return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, url=url)
 
@@ -92,11 +97,11 @@ def active_vpn_kb():
         eid = s.get(emoji_id_setting_key, "0")
         txt = f"{e} {label}" if e else label
         if url:
-            if eid and eid != "0" and str(eid).strip():
+            if _is_valid_emoji_id(eid):
                 return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
             return InlineKeyboardButton(text=txt, url=url)
         else:
-            if eid and eid != "0" and str(eid).strip():
+            if _is_valid_emoji_id(eid):
                 return InlineKeyboardButton(text=txt, callback_data=callback_data, icon_custom_emoji_id=str(eid))
             return InlineKeyboardButton(text=txt, callback_data=callback_data)
 
@@ -358,11 +363,11 @@ async def info_reply(m: Message):
         eid = s.get(emoji_id_setting_key, "0")
         txt = f"{e} {label}" if e else label
         if url:
-            if eid and eid != "0" and str(eid).strip():
+            if _is_valid_emoji_id(eid):
                 return InlineKeyboardButton(text=txt, url=url, icon_custom_emoji_id=str(eid))
             return InlineKeyboardButton(text=txt, url=url)
         else:
-            if eid and eid != "0" and str(eid).strip():
+            if _is_valid_emoji_id(eid):
                 return InlineKeyboardButton(text=txt, callback_data=cb, icon_custom_emoji_id=str(eid))
             return InlineKeyboardButton(text=txt, callback_data=cb)
 
@@ -609,7 +614,7 @@ def tariff_kb(plans, dev, is_gift):
     cb_p, dev_p = ("gift_pay", "gift_dev") if is_gift else ("pay_select", "dev_set")
 
     dev_row = []
-    if down_id and down_id != "0" and str(down_id).strip():
+    if _is_valid_emoji_id(down_id):
         dev_row.append(
             InlineKeyboardButton(text="◀", callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
     elif dev > 1:
@@ -619,7 +624,7 @@ def tariff_kb(plans, dev, is_gift):
 
     dev_row.append(InlineKeyboardButton(text=str(dev), callback_data="ignore"))
 
-    if up_id and up_id != "0" and str(up_id).strip():
+    if _is_valid_emoji_id(up_id):
         dev_row.append(InlineKeyboardButton(text="▶", callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
     elif dev < 15:
         dev_row.append(InlineKeyboardButton(text="▶", callback_data=f"{dev_p}_{n_c}"))
@@ -633,7 +638,7 @@ def tariff_kb(plans, dev, is_gift):
     for p in plans:
         pr = calculate_price(p['price_rub'], dev)
         lbl = f"{p['label']} — {pr} ₽"
-        if plan_eid and plan_eid != "0" and str(plan_eid).strip():
+        if _is_valid_emoji_id(plan_eid):
             btns.append([InlineKeyboardButton(
                 text=f"{plan_e} {lbl}" if plan_e else lbl,
                 callback_data=f"{cb_p}_{p['id']}_{dev}",
@@ -711,7 +716,7 @@ async def pay_sel_h(c: CallbackQuery):
         yoo_id = s.get("kb_pay_yoo_id", "0")
 
         def _pay_btn(text, emoji_char, custom_id, cb_data):
-            if custom_id and custom_id != "0" and str(custom_id).strip():
+            if _is_valid_emoji_id(custom_id):
                 return InlineKeyboardButton(text=text, callback_data=cb_data, icon_custom_emoji_id=str(custom_id))
             return InlineKeyboardButton(text=f"{emoji_char} {text}" if emoji_char else text, callback_data=cb_data)
 
@@ -784,11 +789,20 @@ async def crypto_pay_h(c: CallbackQuery, state: FSMContext):
             invoice_id = invoice["invoice_id"]
             await state.update_data(crypto_invoice_id=invoice_id, crypto_is_gift=is_gift)
             await state.set_state(UserStates.wait_for_crypto_check)
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💎 Оплатить через CryptoBot", url=pay_url)],
-                [InlineKeyboardButton(text="✅ Я оплатил",
-                                      callback_data=f"check_crypto_{invoice_id}_{p['code']}_{p['days']}_{total_rub}_{pay_type}")]
-            ])
+            crypto_pay_e = s.get("pay_btn_crypto_pay_emoji", "💎")
+            crypto_pay_id = s.get("pay_btn_crypto_pay_id", "0")
+            paid_e = s.get("pay_btn_paid_emoji", "✅")
+            paid_id = s.get("pay_btn_paid_id", "0")
+            paid_cb = f"check_crypto_{invoice_id}_{p['code']}_{p['days']}_{total_rub}_{pay_type}"
+            if _is_valid_emoji_id(crypto_pay_id):
+                pay_btn = InlineKeyboardButton(text="Оплатить через CryptoBot", url=pay_url, icon_custom_emoji_id=str(crypto_pay_id))
+            else:
+                pay_btn = InlineKeyboardButton(text=f"{crypto_pay_e} Оплатить через CryptoBot" if crypto_pay_e else "Оплатить через CryptoBot", url=pay_url)
+            if _is_valid_emoji_id(paid_id):
+                paid_btn = InlineKeyboardButton(text="Я оплатил", callback_data=paid_cb, icon_custom_emoji_id=str(paid_id))
+            else:
+                paid_btn = InlineKeyboardButton(text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил", callback_data=paid_cb)
+            kb = InlineKeyboardMarkup(inline_keyboard=[[pay_btn], [paid_btn]])
             await c.message.edit_text(
                 f"💎 <b>Оплата через CryptoBot</b>\n\nСумма: <b>{usdt} USDT</b>\nТариф: <b>{p['label']}</b>\n\nНажмите кнопку ниже для оплаты, затем нажмите «Я оплатил»",
                 reply_markup=kb)
@@ -860,11 +874,20 @@ async def yoo_pay_h(c: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.wait_for_yoo_check)
     pay_url = (f"https://yoomoney.ru/quickpay/confirm.xml?receiver={wallet}"
                f"&quickpay-form=button&targets=VPN+{p['label']}&paymentType=AC&sum={total}&label={label}")
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💛 Оплатить через ЮMoney", url=pay_url)],
-        [InlineKeyboardButton(text="✅ Я оплатил",
-                              callback_data=f"check_yoo_{label}_{p['code']}_{p['days']}_{total}_{pay_type}")]
-    ])
+    yoo_pay_e = s.get("pay_btn_yoo_pay_emoji", "💛")
+    yoo_pay_id = s.get("pay_btn_yoo_pay_id", "0")
+    paid_e = s.get("pay_btn_paid_emoji", "✅")
+    paid_id = s.get("pay_btn_paid_id", "0")
+    paid_cb = f"check_yoo_{label}_{p['code']}_{p['days']}_{total}_{pay_type}"
+    if _is_valid_emoji_id(yoo_pay_id):
+        yoo_pay_btn = InlineKeyboardButton(text="Оплатить через ЮMoney", url=pay_url, icon_custom_emoji_id=str(yoo_pay_id))
+    else:
+        yoo_pay_btn = InlineKeyboardButton(text=f"{yoo_pay_e} Оплатить через ЮMoney" if yoo_pay_e else "Оплатить через ЮMoney", url=pay_url)
+    if _is_valid_emoji_id(paid_id):
+        paid_btn = InlineKeyboardButton(text="Я оплатил", callback_data=paid_cb, icon_custom_emoji_id=str(paid_id))
+    else:
+        paid_btn = InlineKeyboardButton(text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил", callback_data=paid_cb)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[yoo_pay_btn], [paid_btn]])
     await c.message.edit_text(
         f"💛 <b>Оплата через ЮMoney</b>\n\nСумма: <b>{total} ₽</b>\nТариф: <b>{p['label']}</b>\n\nНажмите кнопку ниже, затем «Я оплатил»",
         reply_markup=kb)
