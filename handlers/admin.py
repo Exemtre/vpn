@@ -54,6 +54,8 @@ class AdminStates(StatesGroup):
     wait_for_notif_btn_text = State() # Текст кнопки уведомления
     wait_for_notif_hours = State()    # Часы для уведомления
     wait_for_notif_btn_emoji = State() # ID кастомного эмодзи кнопки уведомления
+    wait_for_forced_sub_channel = State()  # Username/ID обязательного канала
+    wait_for_forced_sub_text = State()     # Текст сообщения обязательной подписки
 
 def admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -71,6 +73,7 @@ def admin_kb():
         [InlineKeyboardButton(text="💳 Эмодзи кнопок оплаты", callback_data="admin_pay_emoji")],
         [InlineKeyboardButton(text="🔔 Эмодзи кнопок Инфо и VPN", callback_data="admin_info_vpn_emoji")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="admin_notifications")],
+        [InlineKeyboardButton(text="📢 Обязательная подписка", callback_data="admin_forced_sub")],
         [InlineKeyboardButton(text="🖼 Изменить GIF", callback_data="admin_edit_gif"),
          InlineKeyboardButton(text="🎭 Стикер на старте", callback_data="admin_edit_sticker")],
     ])
@@ -536,6 +539,20 @@ GLOBAL_EMOJI_KEYS = {
     "ge_sub_active":  "Эмодзи активной подписки (замена ✅)",
     "ge_sub_no":      "Эмодзи отсутствия подписки (замена ❌)",
     "ge_free_server": "Эмодзи бесплатного сервера (замена 🆓)",
+    "ge_plan_label":  "Эмодзи тарифа в профиле (замена 📦)",
+    # Экран активной подписки
+    "ge_active_sub":  "Эмодзи заголовка подписки (замена 🔐)",
+    "ge_vpn_link":    "Эмодзи ключа VPN (замена 🔗)",
+    "ge_active_hint": "Эмодзи подсказки подключения (замена 💡)",
+    # Сообщение об оплате / выставлении счёта
+    "ge_pay_success": "Эмодзи заголовка оплаты (замена ⭐)",
+    "ge_pay_price":   "Эмодзи стоимости (замена 💰)",
+    "ge_pay_expires": "Эмодзи даты подписки (замена 📅)",
+    "ge_pay_plan":    "Эмодзи плана в оплате (замена 📦)",
+    "ge_pay_method":  "Эмодзи метода оплаты (замена 💳)",
+    "ge_pay_num":     "Эмодзи номера оплаты (замена 🔢)",
+    "ge_pay_link":    "Эмодзи ключа в оплате (замена 🔗)",
+    "ge_pay_note":    "Эмодзи примечания оплаты (замена 📝)",
 }
 
 
@@ -1405,3 +1422,89 @@ async def adm_sticker_cmd(m: Message, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_sticker)
 async def adm_sticker_wrong(m: Message, state: FSMContext):
     await m.answer("❌ Отправьте стикер или напишите «0» для отключения.")
+
+
+# ─── ОБЯЗАТЕЛЬНАЯ ПОДПИСКА НА КАНАЛ ──────────────────────────────────────────
+
+def _forced_sub_kb(s):
+    enabled = s.get("forced_sub_enabled", "0") == "1"
+    channel = s.get("forced_sub_channel", "не задан")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅ Включена' if enabled else '❌ Выключена'} — нажать для переключения",
+            callback_data="forced_sub_toggle"
+        )],
+        [InlineKeyboardButton(text=f"📢 Канал: {channel}", callback_data="forced_sub_set_channel")],
+        [InlineKeyboardButton(text="✏️ Текст сообщения", callback_data="forced_sub_set_text")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
+    ])
+
+
+@admin_router.callback_query(F.data == "admin_forced_sub", F.from_user.id.in_(ADMIN_IDS))
+async def admin_forced_sub_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    enabled = s.get("forced_sub_enabled", "0") == "1"
+    channel = s.get("forced_sub_channel", "не задан")
+    text_preview = s.get("forced_sub_text", "🔒 Для использования бота необходимо подписаться на наш канал.")[:80]
+    await c.message.edit_text(
+        f"📢 <b>Обязательная подписка на канал</b>\n\n"
+        f"Статус: {'✅ Включена' if enabled else '❌ Выключена'}\n"
+        f"Канал: <code>{channel}</code>\n"
+        f"Текст: {text_preview}",
+        reply_markup=_forced_sub_kb(s)
+    )
+
+
+@admin_router.callback_query(F.data == "forced_sub_toggle", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_toggle(c: CallbackQuery):
+    s = get_bot_settings()
+    current = s.get("forced_sub_enabled", "0")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting("forced_sub_enabled", new_val)
+    await c.answer("✅ Включена" if new_val == "1" else "❌ Выключена")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_forced_sub_kb(s))
+
+
+@admin_router.callback_query(F.data == "forced_sub_set_channel", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_set_channel_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("forced_sub_channel", "")
+    await c.message.answer(
+        f"📢 <b>Укажите username или ID канала</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите username (например <code>@mychannel</code>) или числовой ID канала.\n"
+        "Бот должен быть администратором канала!",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_forced_sub_channel)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_forced_sub_channel)
+async def forced_sub_save_channel(m: Message, state: FSMContext):
+    val = m.text.strip()
+    set_bot_setting("forced_sub_channel", val)
+    await m.answer(f"✅ Канал сохранён: <code>{val}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "forced_sub_set_text", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_set_text_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("forced_sub_text", "🔒 Для использования бота необходимо подписаться на наш канал.")
+    await c.message.answer(
+        f"✏️ <b>Текст сообщения обязательной подписки</b>\n\n"
+        f"Текущий текст:\n{cur}\n\n"
+        "Введите новый текст (HTML поддерживается):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_forced_sub_text)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_forced_sub_text)
+async def forced_sub_save_text(m: Message, state: FSMContext):
+    set_bot_setting("forced_sub_text", m.text.strip())
+    await m.answer("✅ Текст сообщения сохранён!")
+    await state.clear()

@@ -39,6 +39,35 @@ def _is_valid_emoji_id(eid):
     return bool(eid and str(eid).strip().isdigit() and str(eid).strip() != "0")
 
 
+async def _check_forced_subscription(user_id: int, bot) -> bool:
+    """Returns True if forced-channel check passes (not enabled, or user is member)."""
+    s = get_bot_settings()
+    if s.get("forced_sub_enabled", "0") != "1":
+        return True
+    channel = s.get("forced_sub_channel", "").strip()
+    if not channel:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+        return member.status not in ("left", "kicked", "banned")
+    except Exception:
+        return True  # fail-open so a mis-configured channel doesn't lock everyone out
+
+
+async def _send_forced_sub_message(user_id: int, bot):
+    """Sends the 'please subscribe' gate message."""
+    s = get_bot_settings()
+    channel = s.get("forced_sub_channel", "").strip()
+    text = s.get("forced_sub_text",
+                 "🔒 Для использования бота необходимо подписаться на наш канал.")
+    channel_url = channel if channel.startswith("http") else f"https://t.me/{channel.lstrip('@')}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Подписаться", url=channel_url)],
+        [InlineKeyboardButton(text="✅ Я подписался", callback_data="forced_sub_check")],
+    ])
+    await bot.send_message(user_id, text, reply_markup=kb)
+
+
 def get_main_reply_kb(user_id: int):
     s = get_bot_settings()
     vpn_e = s.get("kb_vpn_emoji", "⚡️")
@@ -268,6 +297,10 @@ async def cmd_start(message: Message):
         referrer_id = args[1]
 
     create_user(message.from_user.id, message.from_user.full_name, message.from_user.username, referrer_id)
+
+    if not await _check_forced_subscription(message.from_user.id, message.bot):
+        await _send_forced_sub_message(message.from_user.id, message.bot)
+        return
 
     s = get_bot_settings()
     gif = s.get("start_media_id")
@@ -1068,3 +1101,34 @@ async def back_h(c: CallbackQuery):
             return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
     await c.answer()
+
+
+@user_router.callback_query(F.data == "forced_sub_check")
+async def forced_sub_check_cb(c: CallbackQuery):
+    if await _check_forced_subscription(c.from_user.id, c.bot):
+        try:
+            await c.message.delete()
+        except:
+            pass
+        s = get_bot_settings()
+        gif = s.get("start_media_id")
+        text = s.get("start_text", "<b>🔐 Добро пожаловать в AnonchVPN!</b>\n\nЯ — ваш помощник в мире интернет-свободы!")
+        if gif:
+            gif_sent = False
+            try:
+                await c.bot.send_message(c.from_user.id, text, reply_markup=main_menu_kb())
+                gif_sent = True
+            except:
+                pass
+            if gif_sent:
+                try:
+                    await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
+                except:
+                    pass
+                await c.answer("✅ Добро пожаловать!")
+                return
+        await c.bot.send_message(c.from_user.id, text, reply_markup=get_main_reply_kb(c.from_user.id))
+        await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=main_menu_kb())
+        await c.answer("✅ Добро пожаловать!")
+    else:
+        await c.answer("❌ Вы ещё не подписались на канал!", show_alert=True)
