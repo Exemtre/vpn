@@ -187,6 +187,13 @@ def set_subscription(user_id, plan_code, days, price):
     conn.close()
 
 
+def revoke_subscription(user_id):
+    conn = get_conn()
+    conn.execute("UPDATE users SET sub_expires=NULL, plan=NULL WHERE user_id=?", (str(user_id),))
+    conn.commit()
+    conn.close()
+
+
 def get_promo(code):
     conn = get_conn()
     r = conn.execute("SELECT * FROM promo_codes WHERE code=? AND uses_left>0", (code.upper(),)).fetchone()

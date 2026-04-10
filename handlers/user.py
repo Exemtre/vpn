@@ -281,15 +281,21 @@ async def cmd_start(message: Message):
             pass
 
     if gif:
+        gif_sent = False
         try:
             await message.answer_animation(animation=gif, caption=text, reply_markup=main_menu_kb())
-            await message.answer("⠀", reply_markup=get_main_reply_kb(message.from_user.id))
-            return
+            gif_sent = True
         except:
             pass
+        if gif_sent:
+            try:
+                await message.answer("\u00a0", reply_markup=get_main_reply_kb(message.from_user.id))
+            except:
+                pass
+            return
 
     await message.answer(text, reply_markup=get_main_reply_kb(message.from_user.id))
-    await message.answer("⠀", reply_markup=main_menu_kb())
+    await message.answer("\u00a0", reply_markup=main_menu_kb())
 
 
 @user_router.message(F.text.endswith("Подключить VPN"))
@@ -1047,11 +1053,18 @@ async def back_h(c: CallbackQuery):
     text = s.get("start_text", "<b>🔐 Добро пожаловать в AnonchVPN!</b>\n\nЯ — ваш помощник в мире интернет-свободы!")
     kb = get_main_reply_kb(c.from_user.id)
     if gif:
+        gif_sent = False
         try:
             await c.message.answer_animation(animation=gif, caption=text, reply_markup=main_menu_kb())
-            await c.answer()
-            return
+            gif_sent = True
         except:
             pass
+        if gif_sent:
+            try:
+                await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
+            except:
+                pass
+            await c.answer()
+            return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
     await c.answer()

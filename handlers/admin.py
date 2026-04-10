@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,8 +9,9 @@ from database.models import (
     set_bot_setting, get_bot_settings, get_stats, get_all_plans,
     update_plan_price, update_plan_link, update_plan_instruction, get_user, toggle_ban_user,
     update_user_balance, get_all_users, create_promo, get_all_promos,
-    add_user_device, get_user_devices, delete_user_device
+    add_user_device, get_user_devices, delete_user_device, revoke_subscription
 )
+from handlers.notifications import check_and_send_notifications
 
 admin_router = Router()
 
@@ -151,6 +153,35 @@ async def admin_user_card(c: CallbackQuery):
         [InlineKeyboardButton(text="💰 Изменить баланс", callback_data=f"adm_editbal_{uid}")],
         [InlineKeyboardButton(text="🚫 Бан / Разбан", callback_data=f"adm_toggleban_{uid}")],
         [InlineKeyboardButton(text="📱 Устройства VPN", callback_data=f"adm_devices_{uid}")],
+        [InlineKeyboardButton(text="❌ Забрать подписку", callback_data=f"adm_revokesub_{uid}")],
+        [InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_page_0")]
+    ])
+    await c.message.edit_text(text, reply_markup=kb)
+
+
+@admin_router.callback_query(F.data.startswith("adm_revokesub_"), F.from_user.id.in_(ADMIN_IDS))
+async def adm_revoke_sub(c: CallbackQuery):
+    uid = c.data.split("_")[2]
+    revoke_subscription(uid)
+    await c.answer("✅ Подписка отозвана", show_alert=True)
+    u = get_user(uid)
+    if not u:
+        return
+    status = "🔴 Забанен" if u['is_banned'] else "🟢 Активен"
+    text = (
+        f"👤 <b>{u['full_name']}</b>\n"
+        f"🆔 ID: <code>{u['user_id']}</code>\n"
+        f"👤 Username: @{u.get('username') or '—'}\n"
+        f"💰 Баланс: <b>{u['balance']} ₽</b>\n"
+        f"🛡 Статус: {status}\n"
+        f"📦 Тариф: {u.get('plan') or 'Нет'}\n"
+        f"📅 Подписка до: {u['sub_expires'][:10] if u['sub_expires'] else 'Нет'}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Изменить баланс", callback_data=f"adm_editbal_{uid}")],
+        [InlineKeyboardButton(text="🚫 Бан / Разбан", callback_data=f"adm_toggleban_{uid}")],
+        [InlineKeyboardButton(text="📱 Устройства VPN", callback_data=f"adm_devices_{uid}")],
+        [InlineKeyboardButton(text="❌ Забрать подписку", callback_data=f"adm_revokesub_{uid}")],
         [InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_page_0")]
     ])
     await c.message.edit_text(text, reply_markup=kb)
@@ -1010,6 +1041,7 @@ def _notif_kb(s):
                 callback_data=f"notif_edit_{ntype}_btn_emoji"
             ),
         ])
+    kb.append([InlineKeyboardButton(text="📨 Отправить сейчас", callback_data="notif_send_now")])
     kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -1029,6 +1061,13 @@ async def admin_notifications_menu(c: CallbackQuery):
             f"Текст: {text_preview}\n"
         )
     await c.message.edit_text("\n".join(lines), reply_markup=_notif_kb(s))
+
+
+@admin_router.callback_query(F.data == "notif_send_now", F.from_user.id.in_(ADMIN_IDS))
+async def notif_send_now(c: CallbackQuery):
+    await c.answer("⏳ Запускаю рассылку уведомлений...")
+    asyncio.create_task(check_and_send_notifications(c.bot))
+    await c.message.answer("✅ Уведомления запущены в фоне!")
 
 
 @admin_router.callback_query(F.data.startswith("notif_toggle_"), F.from_user.id.in_(ADMIN_IDS))
