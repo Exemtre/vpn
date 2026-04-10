@@ -87,9 +87,9 @@ def active_vpn_kb():
     s = get_bot_settings()
     install_url = s.get("info_install_url", "")
 
-    def _vpn_btn(label, e_key, default_e, eid_key, url=None, cb=None):
-        e = s.get(e_key, default_e)
-        eid = s.get(eid_key, "0")
+    def _build_button_with_emoji(label, emoji_setting_key, default_emoji, emoji_id_setting_key, url=None, callback_data=None):
+        e = s.get(emoji_setting_key, default_emoji)
+        eid = s.get(emoji_id_setting_key, "0")
         txt = f"{e} {label}" if e else label
         if url:
             if eid and eid != "0" and str(eid).strip():
@@ -97,16 +97,16 @@ def active_vpn_kb():
             return InlineKeyboardButton(text=txt, url=url)
         else:
             if eid and eid != "0" and str(eid).strip():
-                return InlineKeyboardButton(text=txt, callback_data=cb, icon_custom_emoji_id=str(eid))
-            return InlineKeyboardButton(text=txt, callback_data=cb)
+                return InlineKeyboardButton(text=txt, callback_data=callback_data, icon_custom_emoji_id=str(eid))
+            return InlineKeyboardButton(text=txt, callback_data=callback_data)
 
     rows = []
     if install_url:
-        rows.append([_vpn_btn("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
+        rows.append([_build_button_with_emoji("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
     else:
-        rows.append([_vpn_btn("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", cb="install_vpn_stub")])
-    rows.append([_vpn_btn("Подключённые устройства", "btn_devices_emoji", "📱", "btn_devices_emoji_id", cb="connected_devices")])
-    rows.append([_vpn_btn("Продлить подписку", "btn_renew_emoji", "🔄", "btn_renew_emoji_id", cb="renew_sub")])
+        rows.append([_build_button_with_emoji("Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", callback_data="install_vpn_stub")])
+    rows.append([_build_button_with_emoji("Подключённые устройства", "btn_devices_emoji", "📱", "btn_devices_emoji_id", callback_data="connected_devices")])
+    rows.append([_build_button_with_emoji("Продлить подписку", "btn_renew_emoji", "🔄", "btn_renew_emoji_id", callback_data="renew_sub")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -353,9 +353,9 @@ async def info_reply(m: Message):
     support_url = s.get("info_support_url", "")
     install_url = s.get("info_install_url", "")
 
-    def _ib(label, e_key, default_e, eid_key, url=None, cb=None):
-        e = s.get(e_key, default_e)
-        eid = s.get(eid_key, "0")
+    def _build_info_button(label, emoji_setting_key, default_emoji, emoji_id_setting_key, url=None, cb=None):
+        e = s.get(emoji_setting_key, default_emoji)
+        eid = s.get(emoji_id_setting_key, "0")
         txt = f"{e} {label}" if e else label
         if url:
             if eid and eid != "0" and str(eid).strip():
@@ -368,24 +368,24 @@ async def info_reply(m: Message):
 
     kb_rows = []
     if agree_url:
-        kb_rows.append([_ib("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", url=agree_url)])
+        kb_rows.append([_build_info_button("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", url=agree_url)])
     else:
-        kb_rows.append([_ib("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", cb="agree_stub")])
+        kb_rows.append([_build_info_button("Пользовательское соглашение", "btn_info_agree_emoji", "📄", "btn_info_agree_emoji_id", cb="agree_stub")])
     if privacy_url:
-        kb_rows.append([_ib("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", url=privacy_url)])
+        kb_rows.append([_build_info_button("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", url=privacy_url)])
     else:
-        kb_rows.append([_ib("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", cb="info_stub")])
+        kb_rows.append([_build_info_button("Политика конфиденциальности", "btn_info_privacy_emoji", "🔒", "btn_info_privacy_emoji_id", cb="info_stub")])
     if refund_url:
-        kb_rows.append([_ib("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", url=refund_url)])
+        kb_rows.append([_build_info_button("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", url=refund_url)])
     else:
-        kb_rows.append([_ib("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", cb="info_stub")])
+        kb_rows.append([_build_info_button("Политика возврата", "btn_info_refund_emoji", "💰", "btn_info_refund_emoji_id", cb="info_stub")])
     if support_url:
-        kb_rows.append([_ib("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", url=support_url)])
+        kb_rows.append([_build_info_button("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", url=support_url)])
     else:
-        kb_rows.append([_ib("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", cb="support_stub")])
+        kb_rows.append([_build_info_button("Техническая поддержка", "btn_info_support_emoji", "🛠", "btn_info_support_emoji_id", cb="support_stub")])
     if install_url:
-        kb_rows.append([_ib("Инструкция по установке", "btn_info_install_emoji", "📲", "btn_info_install_emoji_id", url=install_url)])
-    kb_rows.append([_ib("Канал", "btn_info_channel_emoji", "📢", "btn_info_channel_emoji_id", url=channel)])
+        kb_rows.append([_build_info_button("Инструкция по установке", "btn_info_install_emoji", "📲", "btn_info_install_emoji_id", url=install_url)])
+    kb_rows.append([_build_info_button("Канал", "btn_info_channel_emoji", "📢", "btn_info_channel_emoji_id", url=channel)])
     await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
 
 

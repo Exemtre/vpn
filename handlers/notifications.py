@@ -21,6 +21,9 @@ _NOCONN_DEFAULT_TEXT = (
 )
 
 
+NOTIFICATION_CHECK_INTERVAL = 3600  # seconds between scheduler runs
+
+
 async def check_and_send_notifications(bot):
     s = get_bot_settings()
 
@@ -85,4 +88,4 @@ async def scheduler_task(bot):
             await check_and_send_notifications(bot)
         except Exception as e:
             logging.error(f"Notification scheduler error: {e}")
-        await asyncio.sleep(3600)
+        await asyncio.sleep(NOTIFICATION_CHECK_INTERVAL)

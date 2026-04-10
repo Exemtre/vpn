@@ -1007,6 +1007,7 @@ async def save_notif_hours(m: Message, state: FSMContext):
     except (ValueError, TypeError):
         await m.answer("❌ Введите целое положительное число!")
 
+
 @admin_router.callback_query(F.data == "admin_payments", F.from_user.id.in_(ADMIN_IDS))
 async def admin_payments_menu(c: CallbackQuery):
     s = get_bot_settings()
