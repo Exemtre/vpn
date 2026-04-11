@@ -16,10 +16,12 @@ async def _get_marzban_token(url: str, username: str, password: str) -> str:
             return data["access_token"]
 
 
-async def marzban_create_or_update_user(telegram_user_id: int, days: int) -> str | None:
+async def marzban_create_or_update_user(telegram_user_id: int, days: int) -> tuple[str, str] | None:
     """
     Creates or updates a Marzban user for the given Telegram user ID.
-    Returns the first subscription link, or None if Marzban is disabled / an error occurs.
+    Returns (vpn_key, sub_url) tuple, or None if Marzban is disabled / an error occurs.
+    vpn_key is the first individual protocol link (e.g. vless://...).
+    sub_url is the subscription URL (e.g. http://host/sub/username).
     """
     s = get_bot_settings()
     if s.get("marzban_enabled", "0") != "1":
@@ -82,9 +84,9 @@ async def marzban_create_or_update_user(telegram_user_id: int, days: int) -> str
                     data = await resp.json()
 
         links = data.get("links", [])
-        if links:
-            return links[0]
-        return data.get("subscription_url") or f"{url}/sub/{mz_username}"
+        vpn_key = links[0] if links else ""
+        sub_url = data.get("subscription_url") or f"{url}/sub/{mz_username}"
+        return vpn_key, sub_url
     except Exception as e:
         print(f"[Marzban] Error for user {telegram_user_id}: {e}")
         return None

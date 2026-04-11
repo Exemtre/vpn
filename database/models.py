@@ -26,6 +26,7 @@ def init_db():
         sub_expires TEXT,
         plan TEXT,
         vpn_key TEXT,
+        sub_url TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         bonus_days INTEGER DEFAULT 0,
         balance INTEGER DEFAULT 0,
@@ -84,11 +85,11 @@ def init_db():
     count = conn.execute("SELECT COUNT(*) as c FROM plans").fetchone()["c"]
     if count == 0:
         defaults = [
-            ("plan_free", "Бесплатный (Швеция)", 36500, 5, 0, 0, "https://t.me/your_free_vpn_link", 1),
-            ("plan_30", "1 месяц", 30, 5, 299, 150, "https://t.me/your_paid_vpn_link", 2),
-            ("plan_90", "3 месяца", 90, 5, 799, 400, "https://t.me/your_paid_vpn_link", 3),
-            ("plan_180", "6 месяцев", 180, 5, 1499, 750, "https://t.me/your_paid_vpn_link", 4),
-            ("plan_365", "12 месяцев", 365, 5, 2799, 1400, "https://t.me/your_paid_vpn_link", 5),
+            ("plan_trial", "Пробный (3 дня)", 3, 1, 0, 0, "Ссылка не задана", 1),
+            ("plan_30", "1 месяц", 30, 5, 299, 150, "Ссылка не задана", 2),
+            ("plan_90", "3 месяца", 90, 5, 799, 400, "Ссылка не задана", 3),
+            ("plan_180", "6 месяцев", 180, 5, 1499, 750, "Ссылка не задана", 4),
+            ("plan_365", "12 месяцев", 365, 5, 2799, 1400, "Ссылка не задана", 5),
         ]
         conn.executemany(
             "INSERT OR IGNORE INTO plans (code,label,days,max_devices,price_rub,price_stars,vpn_link,sort_order) VALUES (?,?,?,?,?,?,?,?)",
@@ -100,6 +101,22 @@ def init_db():
         conn.commit()
     except Exception:
         pass
+
+    # Миграция: добавить колонку sub_url если её нет
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN sub_url TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
+    # Миграция: добавить план пробного периода если его нет
+    existing_trial = conn.execute("SELECT id FROM plans WHERE code='plan_trial'").fetchone()
+    if not existing_trial:
+        conn.execute(
+            "INSERT OR IGNORE INTO plans (code,label,days,max_devices,price_rub,price_stars,vpn_link,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+            ("plan_trial", "Пробный (3 дня)", 3, 1, 0, 0, "Ссылка не задана", 1)
+        )
+        conn.commit()
 
     # Миграция: таблица подключённых устройств (ИСПРАВЛЕНО - убран DEFAULT)
     conn.execute("""
@@ -140,14 +157,18 @@ def get_all_users():
     return [dict(r) for r in rows]
 
 
-def create_user(user_id, full_name, username, referrer_id=None):
+def create_user(user_id, full_name, username, referrer_id=None) -> bool:
+    """Creates a new user record. Returns True if a new user was created, False if already existed."""
     conn = get_conn()
     existing = conn.execute("SELECT user_id FROM users WHERE user_id=?", (str(user_id),)).fetchone()
     if not existing:
         conn.execute("INSERT OR IGNORE INTO users (user_id, full_name, username, referrer_id) VALUES (?,?,?,?)",
                      (str(user_id), full_name, username or "", str(referrer_id) if referrer_id else None))
         conn.commit()
+        conn.close()
+        return True
     conn.close()
+    return False
 
 
 def update_user_balance(user_id, amount):
@@ -155,6 +176,25 @@ def update_user_balance(user_id, amount):
     conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, str(user_id)))
     conn.commit()
     conn.close()
+
+
+def update_user_sub_url(user_id, sub_url: str):
+    """Store the per-user Marzban subscription URL."""
+    conn = get_conn()
+    conn.execute("UPDATE users SET sub_url=? WHERE user_id=?", (sub_url, str(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def has_used_trial(user_id) -> bool:
+    """Returns True if the user has ever activated the trial plan."""
+    conn = get_conn()
+    r = conn.execute(
+        "SELECT id FROM subscriptions WHERE user_id=? AND plan='plan_trial'",
+        (str(user_id),)
+    ).fetchone()
+    conn.close()
+    return r is not None
 
 
 def update_user_vpn_key(user_id, vpn_key: str):

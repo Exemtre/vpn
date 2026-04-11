@@ -12,7 +12,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from database.models import (
     get_bot_settings, get_all_plans, get_plan, set_subscription, create_user,
-    get_user, update_user_balance, update_user_vpn_key, create_gift, get_gift, claim_gift,
+    get_user, update_user_balance, update_user_vpn_key, update_user_sub_url,
+    has_used_trial, create_gift, get_gift, claim_gift,
     get_promo, use_promo, get_referral_stats, add_subscription_days,
     get_user_devices, delete_user_device
 )
@@ -148,9 +149,9 @@ def profile_kb():
     ])
 
 
-def active_vpn_kb():
+def active_vpn_kb(sub_url: str = ""):
     s = get_bot_settings()
-    install_url = s.get("info_install_url", "")
+    install_url = sub_url or s.get("info_install_url", "")
     rows = []
     if install_url:
         rows.append([_build_dual_emoji_btn(s, "Установить VPN", "btn_install_vpn_emoji", "📲", "btn_install_vpn_emoji_id", url=install_url)])
@@ -161,9 +162,9 @@ def active_vpn_kb():
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def payment_success_kb():
+def payment_success_kb(sub_url: str = ""):
     s = get_bot_settings()
-    install_url = s.get("info_install_url", "")
+    install_url = sub_url or s.get("info_install_url", "")
     support_url = s.get("info_support_url", "")
     rows = []
     if install_url:
@@ -177,7 +178,7 @@ def payment_success_kb():
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_payment_success_text(plan, user_id: int, price: int, method: str = "", user_vpn_link: str = "") -> str:
+def build_payment_success_text(plan, user_id: int, price: int, method: str = "", user_vpn_link: str = "", user_sub_url: str = "") -> str:
     s = get_bot_settings()
     e_success = ce(s.get("ge_pay_success", "0"), "⭐")
     e_price = ce(s.get("ge_pay_price", "0"), "💰")
@@ -185,7 +186,8 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "",
     e_plan = ce(s.get("ge_pay_plan", "0"), "📦")
     e_method = ce(s.get("ge_pay_method", "0"), "💳")
     e_num = ce(s.get("ge_pay_num", "0"), "🔢")
-    e_link = ce(s.get("ge_pay_link", "0"), "🔗")
+    e_link = ce(s.get("ge_vpn_link", "0"), "🔗")
+    e_sub_url = ce(s.get("ge_sub_url", "0"), "🌐")
     e_note = ce(s.get("ge_pay_note", "0"), "📝")
     e_sub = ce(s.get("ge_active_sub", "0"), "🔐")
     e_status = ce(s.get("ge_sub_active", "0"), "✅")
@@ -210,12 +212,29 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "",
         text += f"\n{e_sub} <b>Ваша подписка AnonchVPN</b>\n"
         text += f"├ Статус: {e_status} Активна\n"
         text += f"└ Оплачена до: {exp_date}\n\n"
-        text += f"{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>\n\n"
+        text += f"{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>\n"
+        if user_sub_url:
+            text += f"\n{e_sub_url} <b>Ссылка подписки:</b> <code>{user_sub_url}</code>\n"
+        text += "\n"
+    elif user_sub_url:
+        text += f"\n{e_sub} <b>Ваша подписка AnonchVPN</b>\n"
+        text += f"├ Статус: {e_status} Активна\n"
+        text += f"└ Оплачена до: {exp_date}\n\n"
+        text += f"{e_sub_url} <b>Ссылка подписки:</b> <code>{user_sub_url}</code>\n\n"
 
     note = s.get("pay_success_note",
                  "Подписка будет выдана автоматически после оплаты.\nЕсли столкнулись с проблемами – обратитесь в нашу поддержку, вам помогут.")
     text += f"{e_note} {note}"
     return text
+
+
+async def notify_admins(bot, text: str):
+    """Send a notification message to all configured admin IDs."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            pass
 
 
 async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, price: int, method: str = ""):
@@ -228,19 +247,45 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
             pass
     set_subscription(user_id, plan_code, days, price)
 
-    # Integrate with Marzban: create/update user and get personal VPN link
+    # Integrate with Marzban: create/update user and get personal VPN links
     user_vpn_link = ""
+    user_sub_url = ""
     try:
-        link = await marzban_create_or_update_user(user_id, days)
-        if link:
-            update_user_vpn_key(user_id, link)
-            user_vpn_link = link
+        result = await marzban_create_or_update_user(user_id, days)
+        if result:
+            vpn_key, sub_url = result
+            if vpn_key:
+                update_user_vpn_key(user_id, vpn_key)
+                user_vpn_link = vpn_key
+            if sub_url:
+                update_user_sub_url(user_id, sub_url)
+                user_sub_url = sub_url
     except Exception as e:
         print(f"[Marzban] Activation error for {user_id}: {e}")
 
     p = get_plan(plan_code)
-    text = build_payment_success_text(p, user_id, price, method, user_vpn_link=user_vpn_link)
-    kb = payment_success_kb()
+    method_names = {"stars": "Telegram Stars", "crypto": "Криптовалюта",
+                    "yoo": "ЮMoney", "balance": "Баланс", "free": "Бесплатно"}
+    method_label = method_names.get(method, method or "—")
+    plan_label = p['label'] if p else plan_code
+    if plan_code == 'plan_trial':
+        await notify_admins(bot,
+            f"🆓 <b>Новая пробная подписка</b>\n"
+            f"👤 Пользователь: <code>{user_id}</code>\n"
+            f"📦 Тариф: {plan_label}"
+        )
+    else:
+        await notify_admins(bot,
+            f"💰 <b>Новая покупка!</b>\n"
+            f"👤 Пользователь: <code>{user_id}</code>\n"
+            f"📦 Тариф: {plan_label}\n"
+            f"💵 Сумма: {price} ₽\n"
+            f"💳 Метод: {method_label}"
+        )
+
+    text = build_payment_success_text(p, user_id, price, method,
+                                       user_vpn_link=user_vpn_link, user_sub_url=user_sub_url)
+    kb = payment_success_kb(sub_url=user_sub_url)
     await bot.send_message(user_id, text, reply_markup=kb)
 
 
@@ -256,6 +301,7 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
     e_sub = ce(s.get("ge_active_sub", "0"), "🔐")
     e_status = ce(s.get("ge_sub_active", "0"), "✅")
     e_link = ce(s.get("ge_vpn_link", "0"), "🔗")
+    e_sub_url = ce(s.get("ge_sub_url", "0"), "🌐")
     e_hint = ce(s.get("ge_active_hint", "0"), "💡")
 
     title_tpl = s.get("active_vpn_title",
@@ -263,9 +309,14 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
     title = title_tpl.replace("{e_sub}", e_sub).replace("{e_status}", e_status).replace("{exp}", exp)
 
     vpn_link = user.get('vpn_key') or p.get('vpn_link', '')
+    sub_url = user.get('sub_url', '')
     link_line = ""
     if vpn_link and vpn_link != 'Ссылка не задана':
         link_line = f"\n\n{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>"
+        if sub_url:
+            link_line += f"\n{e_sub_url} <b>Ссылка подписки:</b> <code>{sub_url}</code>"
+    elif sub_url:
+        link_line = f"\n\n{e_sub_url} <b>Ссылка подписки:</b> <code>{sub_url}</code>"
 
     hint_tpl = s.get("active_vpn_hint", "\n\n{e_hint} Для подключения к VPN используйте кнопку снизу.")
     hint = hint_tpl.replace("{e_hint}", e_hint)
@@ -277,7 +328,7 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
             await bot.send_sticker(chat_id, sticker)
         except:
             pass
-    await bot.send_message(chat_id, text, reply_markup=active_vpn_kb())
+    await bot.send_message(chat_id, text, reply_markup=active_vpn_kb(sub_url=sub_url))
 
 
 @user_router.message(CommandStart())
@@ -290,9 +341,15 @@ async def cmd_start(message: Message):
         gift = get_gift(token)
         if gift:
             claim_gift(token, message.from_user.id)
-            create_user(message.from_user.id, message.from_user.full_name, message.from_user.username,
+            is_new = create_user(message.from_user.id, message.from_user.full_name, message.from_user.username,
                         str(gift['from_user_id']))
-            set_subscription(message.from_user.id, gift['plan_code'], gift['days'], 0)
+            if is_new:
+                await notify_admins(message.bot,
+                    f"👤 <b>Новый пользователь (через подарок)</b>\n"
+                    f"ID: <code>{message.from_user.id}</code>\n"
+                    f"Имя: {message.from_user.full_name}"
+                )
+            await _activate_and_notify(message.bot, message.from_user.id, gift['plan_code'], gift['days'], 0, "gift")
             if gift['days'] >= 30:
                 add_subscription_days(gift['from_user_id'], 10)
                 try:
@@ -302,15 +359,20 @@ async def cmd_start(message: Message):
                     )
                 except:
                     pass
-            p = get_plan(gift['plan_code'])
             return await message.answer(
-                f"🎉 <b>Подарок активирован!</b>\n🔗 Ваша ссылка:\n<code>{p['vpn_link']}</code>",
+                "🎉 <b>Подарок активирован!</b>\nВаша подписка VPN выдана автоматически.",
                 reply_markup=get_main_reply_kb(message.from_user.id))
 
     if len(args) > 1 and args[1].isdigit():
         referrer_id = args[1]
 
-    create_user(message.from_user.id, message.from_user.full_name, message.from_user.username, referrer_id)
+    is_new = create_user(message.from_user.id, message.from_user.full_name, message.from_user.username, referrer_id)
+    if is_new:
+        await notify_admins(message.bot,
+            f"👤 <b>Новый пользователь</b>\n"
+            f"ID: <code>{message.from_user.id}</code>\n"
+            f"Имя: {message.from_user.full_name}"
+        )
 
     if not await _check_forced_subscription(message.from_user.id, message.bot):
         await _send_forced_sub_message(message.from_user.id, message.bot)
@@ -348,7 +410,7 @@ async def cmd_start(message: Message):
 @user_router.message(F.text.endswith("Подключить VPN"))
 async def vpn_reply(m: Message):
     u = get_user(m.from_user.id)
-    if u and u.get('sub_expires') and u.get('plan') and u['plan'] != 'plan_free':
+    if u and u.get('sub_expires') and u.get('plan'):
         try:
             exp_dt = datetime.fromisoformat(u['sub_expires'])
             if exp_dt > datetime.utcnow():
@@ -356,7 +418,7 @@ async def vpn_reply(m: Message):
                 return
         except:
             pass
-    await send_tariff_menu(m.chat.id, bot=m.bot)
+    await send_tariff_menu(m.chat.id, bot=m.bot, user_id=m.from_user.id)
 
 
 @user_router.message(F.text.endswith("Профиль"))
@@ -367,16 +429,15 @@ async def profile_reply(m: Message):
         u = get_user(m.from_user.id)
 
     s = get_bot_settings()
-    free = get_plan('plan_free')
-    paid = get_plan(u['plan']) if u and u.get('plan') and u['plan'] != 'plan_free' else None
+    paid = get_plan(u['plan']) if u and u.get('plan') and u['plan'] not in ('plan_free',) else None
 
     id_e = ce(s.get("ge_id", "0"), "🆔")
     stat_e = ce(s.get("ge_sub_status", "0"), "📊")
     yes_e = ce(s.get("ge_sub_active", "0"), "✅")
     no_e = ce(s.get("ge_sub_no", "0"), "❌")
-    free_e = ce(s.get("ge_free_server", "0"), "🆓")
     plan_e = ce(s.get("ge_plan_label", "0"), "📦")
     link_e = ce(s.get("ge_vpn_link", "0"), "🔗")
+    sub_url_e = ce(s.get("ge_sub_url", "0"), "🌐")
 
     t = f"{id_e} <b>Ваш айди:</b> <code>{u['user_id']}</code>\n\n"
 
@@ -393,25 +454,25 @@ async def profile_reply(m: Message):
         t += f"{stat_e} <b>Статус подписки:</b> {yes_e if is_active else no_e} {'Активна' if is_active else 'Истекла'} до <b>{exp}</b>\n"
         t += f"{plan_e} Тариф: <b>{paid['label']}</b>"
 
-        if paid.get('vpn_link') and paid['vpn_link'] != 'Ссылка не задана':
-            vpn_display = u.get('vpn_key') or paid['vpn_link']
+        vpn_display = u.get('vpn_key') or paid.get('vpn_link', '')
+        sub_url = u.get('sub_url', '')
+        if vpn_display and vpn_display != 'Ссылка не задана':
             t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{vpn_display}</code>"
+            if sub_url:
+                t += f"\n{sub_url_e} <b>Ссылка подписки:</b>\n<code>{sub_url}</code>"
             install_url = s.get("info_install_url", "")
             if install_url:
                 t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"
-        elif u.get('vpn_key'):
-            t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{u['vpn_key']}</code>"
+        elif sub_url:
+            t += f"\n\n{sub_url_e} <b>Ссылка подписки:</b>\n<code>{sub_url}</code>"
             install_url = s.get("info_install_url", "")
             if install_url:
                 t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"
 
-        await m.answer(t, reply_markup=active_vpn_kb())
+        await m.answer(t, reply_markup=active_vpn_kb(sub_url=sub_url))
         return
     else:
         t += f"{stat_e} <b>Статус подписки:</b> {no_e} У вас ещё <b>нет подписки</b> на VPN, но вы её можете оформить кнопкой снизу."
-
-    if free:
-        t += f"\n\n{free_e} <b>Швеция (бесплатно):</b>\n{free['vpn_link']}"
 
     await m.answer(t, reply_markup=profile_kb())
 
@@ -531,7 +592,7 @@ async def del_device_cb(c: CallbackQuery):
 
 @user_router.callback_query(F.data == "renew_sub")
 async def renew_sub_cb(c: CallbackQuery):
-    await send_tariff_menu(c.message.chat.id, msg_to_edit=c.message)
+    await send_tariff_menu(c.message.chat.id, msg_to_edit=c.message, user_id=c.from_user.id)
     await c.answer()
 
 
@@ -639,13 +700,21 @@ async def _activate_gift_and_send_link(bot, buyer_id: int, plan_code: str, days:
     await bot.send_message(buyer_id, text, reply_markup=kb)
 
 
-async def send_tariff_menu(chat_id: int, msg_to_edit=None, is_gift: bool = False, bot=None, dev: int = 1):
+async def send_tariff_menu(chat_id: int, msg_to_edit=None, is_gift: bool = False, bot=None, dev: int = 1, user_id: int = None):
     """Отправляет или редактирует меню выбора тарифа."""
     t = get_bot_settings().get("tariff_text", "📦 Выберите тариф:")
-    plans = [p for p in get_all_plans() if p['code'] != 'plan_free' and p['price_rub'] > 0]
-    if not plans:
-        plans = get_all_plans()
-    kb = tariff_kb(plans, dev, is_gift)
+    paid_plans = [p for p in get_all_plans() if p['price_rub'] > 0]
+    if not paid_plans:
+        paid_plans = [p for p in get_all_plans() if p['code'] not in ('plan_trial',)]
+
+    # Show trial plan only for personal subscriptions to users who haven't used it
+    all_display_plans = paid_plans
+    if not is_gift and user_id and not has_used_trial(user_id):
+        trial = get_plan('plan_trial')
+        if trial:
+            all_display_plans = [trial] + paid_plans
+
+    kb = tariff_kb(all_display_plans, dev, is_gift)
     if msg_to_edit:
         if hasattr(msg_to_edit, 'animation') and msg_to_edit.animation:
             await msg_to_edit.delete()
@@ -716,7 +785,7 @@ def tariff_kb(plans, dev, is_gift):
 @user_router.callback_query(F.data == "manage_vpn")
 async def manage_vpn_cb(c: CallbackQuery):
     u = get_user(c.from_user.id)
-    if u and u.get('sub_expires') and u.get('plan') and u['plan'] != 'plan_free':
+    if u and u.get('sub_expires') and u.get('plan'):
         try:
             exp_dt = datetime.fromisoformat(u['sub_expires'])
             if exp_dt > datetime.utcnow():
@@ -729,20 +798,27 @@ async def manage_vpn_cb(c: CallbackQuery):
                 return
         except:
             pass
-    await send_tariff_menu(c.message.chat.id, msg_to_edit=c.message)
+    await send_tariff_menu(c.message.chat.id, msg_to_edit=c.message, user_id=c.from_user.id)
     await c.answer()
 
 
 @user_router.callback_query(F.data.startswith("dev_set_"))
 @user_router.callback_query(F.data.startswith("gift_dev_"))
 async def dev_set_h(c: CallbackQuery):
-    plans = [p for p in get_all_plans() if p['code'] != 'plan_free' and p['price_rub'] > 0]
-    if not plans:
-        plans = get_all_plans()
     is_gift = "gift" in c.data
     dev = int(c.data.split("_")[-1])
+    paid_plans = [p for p in get_all_plans() if p['price_rub'] > 0]
+    if not paid_plans:
+        paid_plans = [p for p in get_all_plans() if p['code'] not in ('plan_trial',)]
+
+    all_display_plans = paid_plans
+    if not is_gift and not has_used_trial(c.from_user.id):
+        trial = get_plan('plan_trial')
+        if trial:
+            all_display_plans = [trial] + paid_plans
+
     t = get_bot_settings().get("tariff_text", "📦 Выберите тариф:")
-    kb = tariff_kb(plans, dev, is_gift)
+    kb = tariff_kb(all_display_plans, dev, is_gift)
     await c.message.edit_text(t, reply_markup=kb)
     await c.answer()
 
@@ -752,7 +828,8 @@ async def dev_set_h(c: CallbackQuery):
 async def pay_sel_h(c: CallbackQuery):
     is_gift = "gift" in c.data
     parts = c.data.split("_")
-    pid = int(parts[2]) if not is_gift else int(parts[3])
+    # Both pay_select_{pid}_{dev} and gift_pay_{pid}_{dev} have pid at index 2
+    pid = int(parts[2])
     dev = int(parts[-1])
     all_plans = get_all_plans()
     p = next((x for x in all_plans if x['id'] == pid), None)
