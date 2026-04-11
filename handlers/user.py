@@ -19,7 +19,7 @@ from database.models import (
     get_user_devices, delete_user_device
 )
 from config import ADMIN_IDS
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from marzban import marzban_create_or_update_user, marzban_get_user_status
 
 user_router = Router()
@@ -593,7 +593,6 @@ async def connected_devices_cb(c: CallbackQuery):
         online_str = "—"
         if mz.get("online_at"):
             try:
-                from datetime import timezone
                 ot = datetime.fromisoformat(mz["online_at"].replace("Z", "+00:00"))
                 diff = datetime.now(timezone.utc) - ot
                 mins = int(diff.total_seconds() // 60)
