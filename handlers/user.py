@@ -743,9 +743,10 @@ async def pay_sel_h(c: CallbackQuery):
     total = calculate_price(p['price_rub'], dev)
     u = get_user(c.from_user.id)
     prefix = "gpay" if is_gift else "pay"
-    t = get_bot_settings().get("invoice_text", "💳 Счёт: {price} ₽").replace("{price}", str(total))
-    kb = []
     s = get_bot_settings()
+    inv_e = ce(s.get("ge_invoice", "0"), "💳")
+    t = s.get("invoice_text", "{e_invoice} Счёт: {price} ₽").replace("{e_invoice}", inv_e).replace("{price}", str(total))
+    kb = []
 
     if total == 0:
         cb = f"gift_free_{pid}" if is_gift else f"personal_free_{pid}"
@@ -769,8 +770,9 @@ async def pay_sel_h(c: CallbackQuery):
         if s.get("pay_yoo_num"):
             kb.append([_pay_btn("ЮMoney", yoo_e, yoo_id, f"{prefix}_yoo_{pid}_{dev}")])
         if u and u['balance'] >= total:
+            bal_e = ce(s.get("ge_pay_balance", "0"), "💰")
             kb.append(
-                [InlineKeyboardButton(text=f"💰 Баланс ({u['balance']} ₽)", callback_data=f"{prefix}_bal_{pid}_{dev}")])
+                [InlineKeyboardButton(text=f"{bal_e} Баланс ({u['balance']} ₽)", callback_data=f"{prefix}_bal_{pid}_{dev}")])
 
     kb.append([make_btn("btn_back", "Вернуться", "manage_vpn", "btn_back_emoji", "🔙")])
     await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))

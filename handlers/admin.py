@@ -343,8 +343,12 @@ async def r_p_li(c: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_plan_price)
 async def s_p_pr(m: Message, state: FSMContext):
     d = await state.get_data()
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
     try:
-        update_plan_price(d['editing_plan'], int(m.text))
+        update_plan_price(plan_id, int(m.text))
         await m.answer("✅ Цена обновлена!")
         await state.clear()
     except:
@@ -354,7 +358,11 @@ async def s_p_pr(m: Message, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_plan_link)
 async def s_p_li(m: Message, state: FSMContext):
     d = await state.get_data()
-    update_plan_link(d['editing_plan'], m.text.strip())
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
+    update_plan_link(plan_id, m.text.strip())
     await m.answer("✅ Ссылка обновлена!")
     await state.clear()
 
@@ -556,6 +564,9 @@ GLOBAL_EMOJI_KEYS = {
     # Обязательная подписка на канал
     "ge_forced_sub_btn":       "Эмодзи кнопки «Подписаться» (замена 📢)",
     "ge_forced_sub_check_btn": "Эмодзи кнопки «Я подписался» (замена ✅)",
+    # Экран выбора оплаты
+    "ge_invoice":     "Эмодзи счёта (замена 💳 в строке «Счёт:»)",
+    "ge_pay_balance": "Эмодзи кнопки «Баланс» при оплате (замена 💰)",
 }
 
 
