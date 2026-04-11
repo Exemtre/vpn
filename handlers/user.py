@@ -187,7 +187,7 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "",
     e_plan = ce(s.get("ge_pay_plan", "0"), "📦")
     e_method = ce(s.get("ge_pay_method", "0"), "💳")
     e_num = ce(s.get("ge_pay_num", "0"), "🔢")
-    e_link = ce(s.get("ge_vpn_link", "0"), "🔗")
+    e_link = ce(s.get("ge_pay_link", "0"), "🔗")
     e_sub_url = ce(s.get("ge_sub_url", "0"), "🌐")
     e_note = ce(s.get("ge_pay_note", "0"), "📝")
     e_sub = ce(s.get("ge_active_sub", "0"), "🔐")
@@ -229,6 +229,23 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "",
     return text
 
 
+def _get_effective_sub_url(user_id: int, stored_sub_url: str, s: dict) -> str:
+    """Return the subscription URL for a user.
+
+    Priority:
+    1. The value stored in the DB (set at activation time).
+    2. If not stored but Marzban is enabled, derive it as <marzban_url>/sub/tg<user_id>.
+    3. Otherwise return empty string.
+    """
+    if stored_sub_url:
+        return stored_sub_url
+    if s.get("marzban_enabled", "0") == "1":
+        marzban_url = s.get("marzban_url", "").rstrip("/")
+        if marzban_url:
+            return f"{marzban_url}/sub/tg{user_id}"
+    return ""
+
+
 async def notify_admins(bot, text: str):
     """Send a notification message to all configured admin IDs."""
     for admin_id in ADMIN_IDS:
@@ -251,6 +268,7 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
     # Integrate with Marzban: create/update user and get personal VPN links
     user_vpn_link = ""
     user_sub_url = ""
+    s = get_bot_settings()
     try:
         result = await marzban_create_or_update_user(user_id, days)
         if result:
@@ -263,6 +281,9 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
                 user_sub_url = sub_url
     except Exception as e:
         logging.warning(f"[Marzban] Activation error for {user_id}: {e}")
+
+    # If Marzban didn't return a sub_url (disabled/error), derive it from the Marzban URL
+    user_sub_url = _get_effective_sub_url(user_id, user_sub_url, s)
 
     p = get_plan(plan_code)
     method_names = {"stars": "Telegram Stars", "crypto": "Криптовалюта",
@@ -310,7 +331,7 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
     title = title_tpl.replace("{e_sub}", e_sub).replace("{e_status}", e_status).replace("{exp}", exp)
 
     vpn_link = user.get('vpn_key') or p.get('vpn_link', '')
-    sub_url = user.get('sub_url', '')
+    sub_url = _get_effective_sub_url(user.get('user_id', 0), user.get('sub_url', ''), s)
     link_line = ""
     if vpn_link and vpn_link != 'Ссылка не задана':
         link_line = f"\n\n{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>"
@@ -456,7 +477,7 @@ async def profile_reply(m: Message):
         t += f"{plan_e} Тариф: <b>{paid['label']}</b>"
 
         vpn_display = u.get('vpn_key') or paid.get('vpn_link', '')
-        sub_url = u.get('sub_url', '')
+        sub_url = _get_effective_sub_url(u.get('user_id', 0), u.get('sub_url', ''), s)
         if vpn_display and vpn_display != 'Ссылка не задана':
             t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{vpn_display}</code>"
             if sub_url:
