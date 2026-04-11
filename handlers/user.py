@@ -2,6 +2,7 @@ import os
 import hashlib
 import hmac
 import time
+import logging
 import aiohttp
 
 from aiogram import Router, F
@@ -261,7 +262,7 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
                 update_user_sub_url(user_id, sub_url)
                 user_sub_url = sub_url
     except Exception as e:
-        print(f"[Marzban] Activation error for {user_id}: {e}")
+        logging.warning(f"[Marzban] Activation error for {user_id}: {e}")
 
     p = get_plan(plan_code)
     method_names = {"stars": "Telegram Stars", "crypto": "Криптовалюта",
@@ -360,7 +361,7 @@ async def cmd_start(message: Message):
                 except:
                     pass
             return await message.answer(
-                "🎉 <b>Подарок активирован!</b>\nВаша подписка VPN выдана автоматически.",
+                "🎉 <b>Подарок активирован!</b>\nВаша подписка VPN выдана автоматически. Перейдите в <b>Подключить VPN</b>, чтобы увидеть свой ключ.",
                 reply_markup=get_main_reply_kb(message.from_user.id))
 
     if len(args) > 1 and args[1].isdigit():
@@ -828,7 +829,8 @@ async def dev_set_h(c: CallbackQuery):
 async def pay_sel_h(c: CallbackQuery):
     is_gift = "gift" in c.data
     parts = c.data.split("_")
-    # Both pay_select_{pid}_{dev} and gift_pay_{pid}_{dev} have pid at index 2
+    # pay_select_{pid}_{dev} → parts[2]=pid, parts[3]=dev
+    # gift_pay_{pid}_{dev}   → parts[2]=pid, parts[3]=dev
     pid = int(parts[2])
     dev = int(parts[-1])
     all_plans = get_all_plans()
