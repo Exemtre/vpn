@@ -18,6 +18,7 @@ from database.models import (
 )
 from config import ADMIN_IDS
 from datetime import datetime, timedelta
+from marzban import marzban_create_or_update_user
 
 user_router = Router()
 
@@ -230,7 +231,6 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
     # Integrate with Marzban: create/update user and get personal VPN link
     user_vpn_link = ""
     try:
-        from marzban import marzban_create_or_update_user
         link = await marzban_create_or_update_user(user_id, days)
         if link:
             update_user_vpn_key(user_id, link)

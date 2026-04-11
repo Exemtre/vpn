@@ -12,6 +12,7 @@ from database.models import (
     add_user_device, get_user_devices, delete_user_device, revoke_subscription
 )
 from handlers.notifications import check_and_send_notifications
+from marzban import marzban_test_connection
 
 admin_router = Router()
 
@@ -1679,7 +1680,6 @@ async def marzban_save_inbound(m: Message, state: FSMContext):
 @admin_router.callback_query(F.data == "marzban_test", F.from_user.id.in_(ADMIN_IDS))
 async def marzban_test_conn(c: CallbackQuery):
     await c.answer("⏳ Проверяю подключение...")
-    from marzban import marzban_test_connection
     ok, msg = await marzban_test_connection()
     await c.message.answer(
         f"🔌 <b>Проверка подключения к Marzban</b>\n\n{msg}"
