@@ -29,7 +29,16 @@ async def main():
     # 5. Запуск поллинга
     print("Бот запущен на aiogram 3...")
     # Пропускаем старые апдейты, чтобы бот не спамил при включении
-    await bot.delete_webhook(drop_pending_updates=True)
+    for attempt in range(5):
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            break
+        except Exception as e:
+            if attempt < 4:
+                logging.warning(f"delete_webhook failed (attempt {attempt + 1}/5): {e}. Retrying in 3s...")
+                await asyncio.sleep(3)
+            else:
+                logging.warning(f"delete_webhook failed after 5 attempts, continuing anyway: {e}")
     await dp.start_polling(bot)
 
 

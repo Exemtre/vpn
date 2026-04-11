@@ -12,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from database.models import (
     get_bot_settings, get_all_plans, get_plan, set_subscription, create_user,
-    get_user, update_user_balance, create_gift, get_gift, claim_gift,
+    get_user, update_user_balance, update_user_vpn_key, create_gift, get_gift, claim_gift,
     get_promo, use_promo, get_referral_stats, add_subscription_days,
     get_user_devices, delete_user_device
 )
@@ -176,7 +176,7 @@ def payment_success_kb():
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_payment_success_text(plan, user_id: int, price: int, method: str = "") -> str:
+def build_payment_success_text(plan, user_id: int, price: int, method: str = "", user_vpn_link: str = "") -> str:
     s = get_bot_settings()
     e_success = ce(s.get("ge_pay_success", "0"), "⭐")
     e_price = ce(s.get("ge_pay_price", "0"), "💰")
@@ -204,7 +204,7 @@ def build_payment_success_text(plan, user_id: int, price: int, method: str = "")
         text += f"{e_method} Метод оплаты: {method_label}\n"
     text += f"{e_num} Номер оплаты: {pay_num}\n"
 
-    vpn_link = plan.get('vpn_link', '')
+    vpn_link = user_vpn_link or plan.get('vpn_link', '')
     if vpn_link and vpn_link != 'Ссылка не задана':
         text += f"\n{e_sub} <b>Ваша подписка AnonchVPN</b>\n"
         text += f"├ Статус: {e_status} Активна\n"
@@ -226,8 +226,20 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
         except:
             pass
     set_subscription(user_id, plan_code, days, price)
+
+    # Integrate with Marzban: create/update user and get personal VPN link
+    user_vpn_link = ""
+    try:
+        from marzban import marzban_create_or_update_user
+        link = await marzban_create_or_update_user(user_id, days)
+        if link:
+            update_user_vpn_key(user_id, link)
+            user_vpn_link = link
+    except Exception as e:
+        print(f"[Marzban] Activation error for {user_id}: {e}")
+
     p = get_plan(plan_code)
-    text = build_payment_success_text(p, user_id, price, method)
+    text = build_payment_success_text(p, user_id, price, method, user_vpn_link=user_vpn_link)
     kb = payment_success_kb()
     await bot.send_message(user_id, text, reply_markup=kb)
 
@@ -250,7 +262,7 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
                       "{e_sub} <b>Ваша подписка AnonchVPN</b>\n├ Статус: {e_status} Активна\n└ Оплачена до: <b>{exp}</b>")
     title = title_tpl.replace("{e_sub}", e_sub).replace("{e_status}", e_status).replace("{exp}", exp)
 
-    vpn_link = p.get('vpn_link', '')
+    vpn_link = user.get('vpn_key') or p.get('vpn_link', '')
     link_line = ""
     if vpn_link and vpn_link != 'Ссылка не задана':
         link_line = f"\n\n{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>"
@@ -382,7 +394,13 @@ async def profile_reply(m: Message):
         t += f"{plan_e} Тариф: <b>{paid['label']}</b>"
 
         if paid.get('vpn_link') and paid['vpn_link'] != 'Ссылка не задана':
-            t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{paid['vpn_link']}</code>"
+            vpn_display = u.get('vpn_key') or paid['vpn_link']
+            t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{vpn_display}</code>"
+            install_url = s.get("info_install_url", "")
+            if install_url:
+                t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"
+        elif u.get('vpn_key'):
+            t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{u['vpn_key']}</code>"
             install_url = s.get("info_install_url", "")
             if install_url:
                 t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"

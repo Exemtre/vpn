@@ -56,6 +56,10 @@ class AdminStates(StatesGroup):
     wait_for_notif_btn_emoji = State() # ID кастомного эмодзи кнопки уведомления
     wait_for_forced_sub_channel = State()  # Username/ID обязательного канала
     wait_for_forced_sub_text = State()     # Текст сообщения обязательной подписки
+    wait_for_marzban_url = State()         # URL сервера Marzban
+    wait_for_marzban_admin_user = State()  # Логин администратора Marzban
+    wait_for_marzban_admin_pass = State()  # Пароль администратора Marzban
+    wait_for_marzban_inbound = State()     # Inbound тег Marzban
 
 def admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -74,6 +78,7 @@ def admin_kb():
         [InlineKeyboardButton(text="🔔 Эмодзи кнопок Инфо и VPN", callback_data="admin_info_vpn_emoji")],
         [InlineKeyboardButton(text="🔔 Уведомления", callback_data="admin_notifications")],
         [InlineKeyboardButton(text="📢 Обязательная подписка", callback_data="admin_forced_sub")],
+        [InlineKeyboardButton(text="🔌 Marzban API", callback_data="admin_marzban")],
         [InlineKeyboardButton(text="🖼 Изменить GIF", callback_data="admin_edit_gif"),
          InlineKeyboardButton(text="🎭 Стикер на старте", callback_data="admin_edit_sticker")],
     ])
@@ -382,8 +387,12 @@ async def r_p_ins(c: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_plan_instruction)
 async def s_p_ins(m: Message, state: FSMContext):
     d = await state.get_data()
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
     text = "" if m.text.strip() == "0" else m.html_text.strip()
-    update_plan_instruction(d['editing_plan'], text)
+    update_plan_instruction(plan_id, text)
     await m.answer("✅ Инструкция обновлена!")
     await state.clear()
 
@@ -1522,3 +1531,156 @@ async def forced_sub_save_text(m: Message, state: FSMContext):
     set_bot_setting("forced_sub_text", m.text.strip())
     await m.answer("✅ Текст сообщения сохранён!")
     await state.clear()
+
+
+# ─── MARZBAN API ───────────────────────────────────────────────────────────────
+
+def _marzban_kb(s):
+    enabled = s.get("marzban_enabled", "0") == "1"
+    url = s.get("marzban_url", "") or "не задан"
+    adm_user = s.get("marzban_admin_user", "") or "не задан"
+    inbound = s.get("marzban_inbound", "") or "не задан"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅ Включён' if enabled else '❌ Выключен'} — нажать для переключения",
+            callback_data="marzban_toggle"
+        )],
+        [InlineKeyboardButton(text=f"🌐 URL: {url[:30]}", callback_data="marzban_set_url")],
+        [InlineKeyboardButton(text=f"👤 Логин: {adm_user}", callback_data="marzban_set_user")],
+        [InlineKeyboardButton(text="🔑 Пароль: ••••••", callback_data="marzban_set_pass")],
+        [InlineKeyboardButton(text=f"📡 Inbound: {inbound}", callback_data="marzban_set_inbound")],
+        [InlineKeyboardButton(text="🔍 Проверить подключение", callback_data="marzban_test")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
+    ])
+
+
+@admin_router.callback_query(F.data == "admin_marzban", F.from_user.id.in_(ADMIN_IDS))
+async def admin_marzban_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    enabled = s.get("marzban_enabled", "0") == "1"
+    url = s.get("marzban_url", "") or "не задан"
+    adm_user = s.get("marzban_admin_user", "") or "не задан"
+    inbound = s.get("marzban_inbound", "") or "не задан"
+    await c.message.edit_text(
+        "🔌 <b>Marzban API</b>\n\n"
+        f"Статус: {'✅ Включён' if enabled else '❌ Выключен'}\n"
+        f"URL: <code>{url}</code>\n"
+        f"Логин: <code>{adm_user}</code>\n"
+        f"Inbound: <code>{inbound}</code>\n\n"
+        "При включении Marzban пользователям при покупке автоматически создаётся "
+        "аккаунт на Marzban-сервере и выдаётся персональная ссылка подключения.",
+        reply_markup=_marzban_kb(s)
+    )
+
+
+@admin_router.callback_query(F.data == "marzban_toggle", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_toggle(c: CallbackQuery):
+    s = get_bot_settings()
+    current = s.get("marzban_enabled", "0")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting("marzban_enabled", new_val)
+    await c.answer("✅ Включён" if new_val == "1" else "❌ Выключен")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_marzban_kb(s))
+
+
+@admin_router.callback_query(F.data == "marzban_set_url", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_url_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_url", "")
+    await c.message.answer(
+        f"🌐 <b>URL Marzban-сервера</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите URL (например: <code>https://marzban.example.com</code>)\n"
+        "или «0» для очистки:",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_url)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_url)
+async def marzban_save_url(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip().rstrip("/")
+    set_bot_setting("marzban_url", val)
+    await m.answer(f"✅ URL сохранён: <code>{val or 'очищен'}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_user", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_user_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_admin_user", "")
+    await c.message.answer(
+        f"👤 <b>Логин администратора Marzban</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите логин (или «0» для очистки):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_admin_user)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_admin_user)
+async def marzban_save_user(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_admin_user", val)
+    await m.answer("✅ Логин сохранён!")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_pass", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_pass_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer(
+        "🔑 <b>Пароль администратора Marzban</b>\n\n"
+        "Введите пароль (или «0» для очистки):\n\n"
+        "⚠️ Сообщение с паролем будет удалено после сохранения.",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_admin_pass)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_admin_pass)
+async def marzban_save_pass(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_admin_pass", val)
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    await m.answer("✅ Пароль сохранён!")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_inbound", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_inbound_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_inbound", "")
+    await c.message.answer(
+        f"📡 <b>Inbound тег Marzban</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите тег inbound (например: <code>vless-tcp</code>), "
+        "или «0» для очистки (будет использоваться первый доступный):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_inbound)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_inbound)
+async def marzban_save_inbound(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_inbound", val)
+    await m.answer(f"✅ Inbound сохранён: <code>{val or 'будет использоваться первый доступный'}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_test", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_test_conn(c: CallbackQuery):
+    await c.answer("⏳ Проверяю подключение...")
+    from marzban import marzban_test_connection
+    ok, msg = await marzban_test_connection()
+    await c.message.answer(
+        f"🔌 <b>Проверка подключения к Marzban</b>\n\n{msg}"
+    )

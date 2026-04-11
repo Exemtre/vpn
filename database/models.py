@@ -157,6 +157,14 @@ def update_user_balance(user_id, amount):
     conn.close()
 
 
+def update_user_vpn_key(user_id, vpn_key: str):
+    """Store the per-user VPN key (e.g. a Marzban subscription link)."""
+    conn = get_conn()
+    conn.execute("UPDATE users SET vpn_key=? WHERE user_id=?", (vpn_key, str(user_id)))
+    conn.commit()
+    conn.close()
+
+
 def toggle_ban_user(user_id):
     conn = get_conn()
     u = conn.execute("SELECT is_banned FROM users WHERE user_id=?", (str(user_id),)).fetchone()
