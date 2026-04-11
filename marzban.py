@@ -85,7 +85,12 @@ async def marzban_create_or_update_user(telegram_user_id: int, days: int) -> tup
 
         links = data.get("links", [])
         vpn_key = links[0] if links else ""
-        sub_url = data.get("subscription_url") or f"{url}/sub/{mz_username}"
+        # subscription_url may be relative (e.g. "/sub/tgXXX") in some Marzban versions
+        sub_url_raw = data.get("subscription_url", "")
+        if sub_url_raw:
+            sub_url = sub_url_raw if sub_url_raw.startswith("http") else f"{url}{sub_url_raw}"
+        else:
+            sub_url = f"{url}/sub/{mz_username}"
         return vpn_key, sub_url
     except Exception as e:
         print(f"[Marzban] Error for user {telegram_user_id}: {e}")
@@ -117,3 +122,49 @@ async def marzban_test_connection() -> tuple[bool, str]:
         return False, f"❌ HTTP {e.status}: {e.message}"
     except Exception as e:
         return False, f"❌ Ошибка: {str(e)[:200]}"
+
+
+async def marzban_get_user_status(telegram_user_id: int) -> dict | None:
+    """
+    Fetches the current Marzban user record for a given Telegram user ID.
+    Returns a dict with keys: status, online_at, used_traffic, data_limit, links, sub_url.
+    Returns None if Marzban is disabled, user not found, or an error occurs.
+    """
+    s = get_bot_settings()
+    if s.get("marzban_enabled", "0") != "1":
+        return None
+
+    url = s.get("marzban_url", "").rstrip("/")
+    adm_user = s.get("marzban_admin_user", "")
+    adm_pass = s.get("marzban_admin_pass", "")
+    if not (url and adm_user and adm_pass):
+        return None
+
+    mz_username = f"tg{telegram_user_id}"
+    try:
+        token = await _get_marzban_token(url, adm_user, adm_pass)
+        headers = {"Authorization": f"Bearer {token}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{url}/api/user/{mz_username}",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+
+        sub_url_raw = data.get("subscription_url", "")
+        sub_url = (sub_url_raw if sub_url_raw.startswith("http") else f"{url}{sub_url_raw}") if sub_url_raw else f"{url}/sub/{mz_username}"
+        return {
+            "status": data.get("status", "unknown"),
+            "online_at": data.get("online_at"),
+            "used_traffic": data.get("used_traffic", 0),
+            "data_limit": data.get("data_limit", 0),
+            "links": data.get("links", []),
+            "sub_url": sub_url,
+            "expire": data.get("expire"),
+        }
+    except Exception as e:
+        print(f"[Marzban] get_user_status error for {telegram_user_id}: {e}")
+        return None

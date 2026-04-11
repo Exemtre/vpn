@@ -20,7 +20,7 @@ from database.models import (
 )
 from config import ADMIN_IDS
 from datetime import datetime, timedelta
-from marzban import marzban_create_or_update_user
+from marzban import marzban_create_or_update_user, marzban_get_user_status
 
 user_router = Router()
 
@@ -282,33 +282,44 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
     except Exception as e:
         logging.warning(f"[Marzban] Activation error for {user_id}: {e}")
 
-    # If Marzban didn't return a sub_url (disabled/error), derive it from the Marzban URL
+    # Fall back to already-stored key if Marzban PUT didn't return links
+    if not user_vpn_link:
+        stored_u = get_user(user_id)
+        user_vpn_link = (stored_u or {}).get('vpn_key', '') or ''
+
+    # Ensure sub_url is available (derive from Marzban URL if not returned)
     user_sub_url = _get_effective_sub_url(user_id, user_sub_url, s)
 
+    # Full invoice sent to admins only
     p = get_plan(plan_code)
     method_names = {"stars": "Telegram Stars", "crypto": "Криптовалюта",
                     "yoo": "ЮMoney", "balance": "Баланс", "free": "Бесплатно"}
     method_label = method_names.get(method, method or "—")
     plan_label = p['label'] if p else plan_code
+    exp_date = (datetime.utcnow() + timedelta(days=days)).strftime("%d.%m.%Y")
+    pay_num = str(user_id)[-8:]
     if plan_code == 'plan_trial':
-        await notify_admins(bot,
+        admin_text = (
             f"🆓 <b>Новая пробная подписка</b>\n"
             f"👤 Пользователь: <code>{user_id}</code>\n"
-            f"📦 Тариф: {plan_label}"
+            f"📦 Тариф: {plan_label}\n"
+            f"📅 До: {exp_date}"
         )
     else:
-        await notify_admins(bot,
+        admin_text = (
             f"💰 <b>Новая покупка!</b>\n"
             f"👤 Пользователь: <code>{user_id}</code>\n"
             f"📦 Тариф: {plan_label}\n"
             f"💵 Сумма: {price} ₽\n"
-            f"💳 Метод: {method_label}"
+            f"💳 Метод: {method_label}\n"
+            f"📅 До: {exp_date}\n"
+            f"🔢 Номер: {pay_num}"
         )
+    await notify_admins(bot, admin_text)
 
-    text = build_payment_success_text(p, user_id, price, method,
-                                       user_vpn_link=user_vpn_link, user_sub_url=user_sub_url)
-    kb = payment_success_kb(sub_url=user_sub_url)
-    await bot.send_message(user_id, text, reply_markup=kb)
+    # User receives the clean active-VPN screen (no invoice details)
+    fresh_user = get_user(user_id)
+    await _send_active_vpn_screen(user_id, fresh_user, bot=bot)
 
 
 async def _send_active_vpn_screen(chat_id, user, bot=None):
@@ -336,9 +347,9 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
     if vpn_link and vpn_link != 'Ссылка не задана':
         link_line = f"\n\n{e_link} <b>Ваш ключ:</b> <code>{vpn_link}</code>"
         if sub_url:
-            link_line += f"\n{e_sub_url} <b>Ссылка подписки:</b> <code>{sub_url}</code>"
+            link_line += f"\n{e_sub_url} <b>Ссылка подписки:</b> <a href=\"{sub_url}\">{sub_url}</a>"
     elif sub_url:
-        link_line = f"\n\n{e_sub_url} <b>Ссылка подписки:</b> <code>{sub_url}</code>"
+        link_line = f"\n\n{e_sub_url} <b>Ссылка подписки:</b> <a href=\"{sub_url}\">{sub_url}</a>"
 
     hint_tpl = s.get("active_vpn_hint", "\n\n{e_hint} Для подключения к VPN используйте кнопку снизу.")
     hint = hint_tpl.replace("{e_hint}", e_hint)
@@ -350,7 +361,8 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
             await bot.send_sticker(chat_id, sticker)
         except:
             pass
-    await bot.send_message(chat_id, text, reply_markup=active_vpn_kb(sub_url=sub_url))
+    await bot.send_message(chat_id, text, reply_markup=active_vpn_kb(sub_url=sub_url),
+                           disable_web_page_preview=True)
 
 
 @user_router.message(CommandStart())
@@ -481,17 +493,17 @@ async def profile_reply(m: Message):
         if vpn_display and vpn_display != 'Ссылка не задана':
             t += f"\n\n{link_e} <b>Ваша ссылка для подключения:</b>\n<code>{vpn_display}</code>"
             if sub_url:
-                t += f"\n{sub_url_e} <b>Ссылка подписки:</b>\n<code>{sub_url}</code>"
+                t += f"\n{sub_url_e} <b>Ссылка подписки:</b> <a href=\"{sub_url}\">{sub_url}</a>"
             install_url = s.get("info_install_url", "")
             if install_url:
                 t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"
         elif sub_url:
-            t += f"\n\n{sub_url_e} <b>Ссылка подписки:</b>\n<code>{sub_url}</code>"
+            t += f"\n\n{sub_url_e} <b>Ссылка подписки:</b> <a href=\"{sub_url}\">{sub_url}</a>"
             install_url = s.get("info_install_url", "")
             if install_url:
                 t += f"\n\n📋 <a href=\"{install_url}\">Инструкция по подключению</a>"
 
-        await m.answer(t, reply_markup=active_vpn_kb(sub_url=sub_url))
+        await m.answer(t, reply_markup=active_vpn_kb(sub_url=sub_url), disable_web_page_preview=True)
         return
     else:
         t += f"{stat_e} <b>Статус подписки:</b> {no_e} У вас ещё <b>нет подписки</b> на VPN, но вы её можете оформить кнопкой снизу."
@@ -562,23 +574,69 @@ async def install_stub_cb(c: CallbackQuery):
 @user_router.callback_query(F.data == "connected_devices")
 async def connected_devices_cb(c: CallbackQuery):
     s = get_bot_settings()
-    devices = get_user_devices(c.from_user.id)
     kb_rows = []
-    if devices:
-        text = "📱 <b>Подключённые устройства</b>\n\n"
-        for d in devices:
-            dt_str = d['connected_at'][:16].replace('T', ' ') if d['connected_at'] else "—"
-            kb_rows.append([
-                InlineKeyboardButton(text=f"📱 {d['device_name']}  ({dt_str})", callback_data="ignore"),
-                InlineKeyboardButton(text="🗑", callback_data=f"del_device_{d['id']}")
-            ])
-    else:
-        text = s.get(
-            "devices_text",
-            "❌ <b>У вас нет подключённых устройств.</b>\n\nПодключитесь к VPN, чтобы увидеть свои устройства в этом списке."
+
+    # Try to get live status from Marzban
+    mz = await marzban_get_user_status(c.from_user.id)
+    if mz:
+        status_labels = {
+            "active": "✅ Активен",
+            "disabled": "🔴 Отключён",
+            "limited": "⚠️ Лимит трафика",
+            "expired": "⌛ Истёк",
+            "on_hold": "⏸ На паузе",
+        }
+        status_str = status_labels.get(mz["status"], mz["status"])
+        used_gb = round(mz["used_traffic"] / (1024 ** 3), 2) if mz["used_traffic"] else 0
+        limit_gb = round(mz["data_limit"] / (1024 ** 3), 2) if mz.get("data_limit") else 0
+
+        online_str = "—"
+        if mz.get("online_at"):
+            try:
+                from datetime import timezone
+                ot = datetime.fromisoformat(mz["online_at"].replace("Z", "+00:00"))
+                diff = datetime.now(timezone.utc) - ot
+                mins = int(diff.total_seconds() // 60)
+                if mins < 2:
+                    online_str = "🟢 Онлайн сейчас"
+                elif mins < 60:
+                    online_str = f"🕐 {mins} мин. назад"
+                elif mins < 1440:
+                    online_str = f"🕐 {mins // 60} ч. назад"
+                else:
+                    online_str = f"🕐 {mins // 1440} дн. назад"
+            except Exception:
+                online_str = str(mz["online_at"])[:16]
+
+        traffic_line = f"{used_gb} ГБ" + (f" / {limit_gb} ГБ" if limit_gb else " (без лимита)")
+        text = (
+            f"📡 <b>Статус подключения</b>\n\n"
+            f"🔹 Статус: {status_str}\n"
+            f"🔹 Последняя активность: {online_str}\n"
+            f"🔹 Использовано трафика: {traffic_line}\n"
         )
+        if mz.get("sub_url"):
+            text += f"\n🌐 <b>Ссылка подписки:</b> <a href=\"{mz['sub_url']}\">{mz['sub_url']}</a>"
+    else:
+        # Fallback: local DB devices
+        devices = get_user_devices(c.from_user.id)
+        if devices:
+            text = "📱 <b>Подключённые устройства</b>\n\n"
+            for d in devices:
+                dt_str = d['connected_at'][:16].replace('T', ' ') if d['connected_at'] else "—"
+                kb_rows.append([
+                    InlineKeyboardButton(text=f"📱 {d['device_name']}  ({dt_str})", callback_data="ignore"),
+                    InlineKeyboardButton(text="🗑", callback_data=f"del_device_{d['id']}")
+                ])
+        else:
+            text = s.get(
+                "devices_text",
+                "❌ <b>У вас нет подключённых устройств.</b>\n\nПодключитесь к VPN, чтобы увидеть свои устройства в этом списке."
+            )
+
     kb_rows.append([make_btn("btn_back", "Вернуться", "active_vpn", "btn_back_emoji", "🔙")])
-    await c.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
+    await c.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
+                              disable_web_page_preview=True)
     await c.answer()
 
 
