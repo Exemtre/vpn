@@ -362,7 +362,11 @@ async def _send_active_vpn_screen(chat_id, user, bot=None):
         except:
             pass
     await bot.send_message(chat_id, text, reply_markup=active_vpn_kb(sub_url=sub_url),
-                           disable_web_page_preview=True)
+                           parse_mode="HTML", disable_web_page_preview=True)
+    try:
+        await bot.send_message(chat_id, "\u00a0", reply_markup=get_main_reply_kb(int(user.get('user_id', chat_id))))
+    except Exception:
+        pass
 
 
 @user_router.message(CommandStart())
@@ -576,6 +580,12 @@ async def connected_devices_cb(c: CallbackQuery):
     s = get_bot_settings()
     kb_rows = []
 
+    e_header = ce(s.get("ge_conn_header", "0"), "📡")
+    e_dot = ce(s.get("ge_conn_status", "0"), "🔹")
+    e_activity = ce(s.get("ge_conn_activity", "0"), "🔹")
+    e_traffic = ce(s.get("ge_conn_traffic", "0"), "🔹")
+    e_sub_url = ce(s.get("ge_conn_sub_url", "0"), "🌐")
+
     # Try to get live status from Marzban
     mz = await marzban_get_user_status(c.from_user.id)
     if mz:
@@ -609,13 +619,13 @@ async def connected_devices_cb(c: CallbackQuery):
 
         traffic_line = f"{used_gb} ГБ" + (f" / {limit_gb} ГБ" if limit_gb else " (без лимита)")
         text = (
-            f"📡 <b>Статус подключения</b>\n\n"
-            f"🔹 Статус: {status_str}\n"
-            f"🔹 Последняя активность: {online_str}\n"
-            f"🔹 Использовано трафика: {traffic_line}\n"
+            f"{e_header} <b>Статус подключения</b>\n\n"
+            f"{e_dot} Статус: {status_str}\n"
+            f"{e_activity} Последняя активность: {online_str}\n"
+            f"{e_traffic} Использовано трафика: {traffic_line}\n"
         )
         if mz.get("sub_url"):
-            text += f"\n🌐 <b>Ссылка подписки:</b> <a href=\"{mz['sub_url']}\">{mz['sub_url']}</a>"
+            text += f"\n{e_sub_url} <b>Ссылка подписки:</b> <a href=\"{mz['sub_url']}\">{mz['sub_url']}</a>"
     else:
         # Fallback: local DB devices
         devices = get_user_devices(c.from_user.id)
@@ -635,7 +645,7 @@ async def connected_devices_cb(c: CallbackQuery):
 
     kb_rows.append([make_btn("btn_back", "Вернуться", "active_vpn", "btn_back_emoji", "🔙")])
     await c.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
-                              disable_web_page_preview=True)
+                              parse_mode="HTML", disable_web_page_preview=True)
     await c.answer()
 
 
@@ -772,11 +782,18 @@ async def _activate_gift_and_send_link(bot, buyer_id: int, plan_code: str, days:
         f"Перешлите эту ссылку другу — при переходе подписка активируется автоматически, "
         f"а он станет вашим рефералом!"
     )
+    copy_eid = s.get("btn_gift_copy_emoji_id", "0")
+    copy_char = s.get("btn_gift_copy_emoji", "📋")
+    if _is_valid_emoji_id(copy_eid):
+        copy_btn = InlineKeyboardButton(text="Скопировать ссылку", switch_inline_query=gift_url, icon_custom_emoji_id=str(copy_eid))
+    else:
+        copy_label = f"{copy_char} Скопировать ссылку" if copy_char else "Скопировать ссылку"
+        copy_btn = InlineKeyboardButton(text=copy_label, switch_inline_query=gift_url)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Скопировать ссылку", switch_inline_query=gift_url)],
+        [copy_btn],
         [make_btn("btn_back", "Главное меню", "back_to_main", "btn_back_emoji", "🔙")]
     ])
-    await bot.send_message(buyer_id, text, reply_markup=kb)
+    await bot.send_message(buyer_id, text, reply_markup=kb, parse_mode="HTML")
 
 
 async def send_tariff_menu(chat_id: int, msg_to_edit=None, is_gift: bool = False, bot=None, dev: int = 1, user_id: int = None):
@@ -950,7 +967,7 @@ async def pay_sel_h(c: CallbackQuery):
                 [InlineKeyboardButton(text=f"{bal_e} Баланс ({u['balance']} ₽)", callback_data=f"{prefix}_bal_{pid}_{dev}")])
 
     kb.append([make_btn("btn_back", "Вернуться", "manage_vpn", "btn_back_emoji", "🔙")])
-    await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    await c.message.edit_text(t, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
     await c.answer()
 
 

@@ -29,6 +29,13 @@ def _is_valid_emoji_id(eid):
     return bool(eid and str(eid).strip().isdigit() and str(eid).strip() != "0")
 
 
+def _ce(emoji_id, fallback):
+    """Return a custom emoji HTML tag if emoji_id is valid, otherwise return fallback."""
+    if _is_valid_emoji_id(emoji_id):
+        return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+    return fallback
+
+
 def _make_notif_btn(text, callback_data, emoji_id):
     """Creates an InlineKeyboardButton for a notification, using custom emoji if valid."""
     if _is_valid_emoji_id(emoji_id):
@@ -45,7 +52,9 @@ async def check_and_send_notifications(bot):
             hours = int(s.get("notif_expiry_hours", "24"))
         except (ValueError, TypeError):
             hours = 24
-        text = s.get("notif_expiry_text", _EXPIRY_DEFAULT_TEXT)
+        raw_text = s.get("notif_expiry_text", _EXPIRY_DEFAULT_TEXT)
+        e_expiry = _ce(s.get("ge_notif_expiry", "0"), "⚠️")
+        text = raw_text.replace("⚠️", e_expiry, 1)
         btn_text = s.get("notif_expiry_btn", "📋 Перейти к продлению")
         btn_emoji_id = s.get("notif_expiry_btn_emoji_id", "0")
 
@@ -60,7 +69,7 @@ async def check_and_send_notifications(bot):
                 kb = InlineKeyboardMarkup(inline_keyboard=[
                     [_make_notif_btn(btn_text, "manage_vpn", btn_emoji_id)]
                 ])
-                await bot.send_message(user_id, text, reply_markup=kb)
+                await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=kb)
                 mark_notification_sent(user_id, notif_key)
             except Exception as e:
                 logging.warning(f"Expiry notification failed for {user_id}: {e}")
@@ -71,7 +80,9 @@ async def check_and_send_notifications(bot):
             hours = int(s.get("notif_noconn_hours", "2"))
         except (ValueError, TypeError):
             hours = 2
-        text = s.get("notif_noconn_text", _NOCONN_DEFAULT_TEXT)
+        raw_text = s.get("notif_noconn_text", _NOCONN_DEFAULT_TEXT)
+        e_noconn = _ce(s.get("ge_notif_noconn", "0"), "🤖")
+        text = raw_text.replace("🤖", e_noconn, 1)
         btn_text = s.get("notif_noconn_btn", "Подключиться")
         btn_emoji_id = s.get("notif_noconn_btn_emoji_id", "0")
         support_url = s.get("info_support_url", "")
@@ -89,7 +100,7 @@ async def check_and_send_notifications(bot):
                     kb_rows.append([InlineKeyboardButton(text="СВЯЗАТЬСЯ", url=support_url)])
                 kb_rows.append([_make_notif_btn(btn_text, "manage_vpn", btn_emoji_id)])
                 kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
-                await bot.send_message(user_id, text, reply_markup=kb)
+                await bot.send_message(user_id, text, parse_mode="HTML", reply_markup=kb)
                 mark_notification_sent(user_id, notif_key)
             except Exception as e:
                 logging.warning(f"Noconn notification failed for {user_id}: {e}")
