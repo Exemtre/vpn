@@ -91,28 +91,31 @@ def get_main_reply_kb(user_id: int):
 def make_btn(text_key, default_text, cb_data, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
-    # emoji_key stores a character emoji; if it's a digit ID (not valid for callback buttons)
-    # fall back to static_emoji
-    e = s.get(emoji_key, static_emoji) or static_emoji
-    if e and str(e).strip().isdigit():
-        e = static_emoji
-    return InlineKeyboardButton(text=f"{e} {text}" if e else text, callback_data=cb_data)
+    eid = s.get(emoji_key, "0")
+    if _is_valid_emoji_id(eid):
+        return InlineKeyboardButton(text=text, callback_data=cb_data, icon_custom_emoji_id=str(eid))
+    return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, callback_data=cb_data)
 
 
 def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
-    e = s.get(emoji_key, static_emoji) or static_emoji
-    if e and str(e).strip().isdigit():
-        e = static_emoji
-    return InlineKeyboardButton(text=f"{e} {text}" if e else text, url=url)
+    eid = s.get(emoji_key, "0")
+    if _is_valid_emoji_id(eid):
+        return InlineKeyboardButton(text=text, url=url, icon_custom_emoji_id=str(eid))
+    return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, url=url)
 
 
 def _build_dual_emoji_btn(s, label, char_key, default_char, id_key, url=None, cb=None):
-    """Build an InlineKeyboardButton using emoji char settings.
-    icon_custom_emoji_id is only valid for switch_inline_query buttons (Telegram Bot API),
-    so we always use the stored character emoji as text prefix for callback/url buttons.
+    """Build an InlineKeyboardButton using separate char and custom-emoji-ID settings.
+    When a valid custom emoji ID is present the text contains no char prefix so the
+    icon_custom_emoji_id is the only emoji shown.  Otherwise the plain char is prepended.
     """
+    eid = s.get(id_key, "0")
+    if _is_valid_emoji_id(eid):
+        if url:
+            return InlineKeyboardButton(text=label, url=url, icon_custom_emoji_id=str(eid))
+        return InlineKeyboardButton(text=label, callback_data=cb, icon_custom_emoji_id=str(eid))
     e = s.get(char_key, default_char)
     txt = f"{e} {label}" if e else label
     if url:
@@ -122,13 +125,15 @@ def _build_dual_emoji_btn(s, label, char_key, default_char, id_key, url=None, cb
 
 def main_menu_kb():
     s = get_bot_settings()
-    vpn_e = s.get("btn_vpn_emoji", "🌐")
-    if vpn_e and str(vpn_e).strip().isdigit():
-        vpn_e = "🌐"
-    vpn_btn = InlineKeyboardButton(
-        text=f"{vpn_e} {s.get('btn_vpn', 'Управление VPN')}" if vpn_e else s.get("btn_vpn", "Управление VPN"),
-        callback_data="manage_vpn"
-    )
+    vpn_id = s.get("kb_vpn_emoji_id", "0")
+    if _is_valid_emoji_id(vpn_id):
+        vpn_btn = InlineKeyboardButton(
+            text=s.get("btn_vpn", "Управление VPN"),
+            callback_data="manage_vpn",
+            icon_custom_emoji_id=str(vpn_id)
+        )
+    else:
+        vpn_btn = make_btn("btn_vpn", "Управление VPN", "manage_vpn", "btn_vpn_emoji", "🌐")
     return InlineKeyboardMarkup(inline_keyboard=[
         [vpn_btn],
         [make_btn("btn_ref", "Пригласить друга", "ref_menu", "btn_ref_emoji", "🤝")],
@@ -834,30 +839,38 @@ def tariff_kb(plans, dev, is_gift):
     cb_p, dev_p = ("gift_pay", "gift_dev") if is_gift else ("pay_select", "dev_set")
 
     dev_row = []
-    if dev > 1:
+    if _is_valid_emoji_id(down_id):
+        dev_row.append(
+            InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
+    elif dev > 1:
         dev_row.append(InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}"))
     else:
         dev_row.append(InlineKeyboardButton(text=down_e, callback_data="ignore"))
 
     dev_row.append(InlineKeyboardButton(text=str(dev), callback_data="ignore"))
 
-    if dev < 15:
+    if _is_valid_emoji_id(up_id):
+        dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
+    elif dev < 15:
         dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}"))
     else:
         dev_row.append(InlineKeyboardButton(text=up_e, callback_data="ignore"))
 
     btns.append(dev_row)
 
+    plan_eid = s.get("kb_plan_emoji_id", "0")
     plan_e = s.get("kb_plan_emoji", "🗓")
-    if plan_e and str(plan_e).strip().isdigit():
-        plan_e = "🗓"
     for p in plans:
         pr = calculate_price(p['price_rub'], dev)
         lbl = f"{p['label']} — {pr} ₽"
-        btns.append([InlineKeyboardButton(
-            text=f"{plan_e} {lbl}" if plan_e else lbl,
-            callback_data=f"{cb_p}_{p['id']}_{dev}"
-        )])
+        if _is_valid_emoji_id(plan_eid):
+            btns.append([InlineKeyboardButton(
+                text=f"{plan_e} {lbl}" if plan_e else lbl,
+                callback_data=f"{cb_p}_{p['id']}_{dev}",
+                icon_custom_emoji_id=str(plan_eid)
+            )])
+        else:
+            btns.append([InlineKeyboardButton(text=f"{plan_e} {lbl}" if plan_e else lbl, callback_data=f"{cb_p}_{p['id']}_{dev}")])
 
     btns.append([make_btn("btn_promo", "Промокод", "enter_promo", "btn_promo_emoji", "🎟")])
     btns.append([make_btn("btn_back", "Назад", "back_to_main", "btn_back_emoji", "🔙")])
@@ -938,9 +951,9 @@ async def pay_sel_h(c: CallbackQuery):
         yoo_id = s.get("kb_pay_yoo_id", "0")
 
         def _pay_btn(text, emoji_char, custom_id, cb_data):
-            # icon_custom_emoji_id not valid for callback buttons; use char emoji in text
-            e = emoji_char if not (emoji_char and str(emoji_char).strip().isdigit()) else ""
-            return InlineKeyboardButton(text=f"{e} {text}" if e else text, callback_data=cb_data)
+            if _is_valid_emoji_id(custom_id):
+                return InlineKeyboardButton(text=text, callback_data=cb_data, icon_custom_emoji_id=str(custom_id))
+            return InlineKeyboardButton(text=f"{emoji_char} {text}" if emoji_char else text, callback_data=cb_data)
 
         kb.append([_pay_btn("Telegram Stars", stars_e, stars_id, f"{prefix}_stars_{pid}_{dev}")])
         if s.get("pay_crypto_tok"):
@@ -1014,17 +1027,17 @@ async def crypto_pay_h(c: CallbackQuery, state: FSMContext):
             await state.set_state(UserStates.wait_for_crypto_check)
             paid_cb = f"check_crypto_{invoice_id}_{p['code']}_{p['days']}_{total_rub}_{pay_type}"
             crypto_pay_e = s.get("pay_btn_crypto_pay_emoji", "💎")
-            if crypto_pay_e and str(crypto_pay_e).strip().isdigit():
-                crypto_pay_e = "💎"
+            crypto_pay_id = s.get("pay_btn_crypto_pay_id", "0")
             paid_e = s.get("pay_btn_paid_emoji", "✅")
-            if paid_e and str(paid_e).strip().isdigit():
-                paid_e = "✅"
-            pay_btn = InlineKeyboardButton(
-                text=f"{crypto_pay_e} Оплатить через CryptoBot" if crypto_pay_e else "Оплатить через CryptoBot",
-                url=pay_url)
-            paid_btn = InlineKeyboardButton(
-                text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил",
-                callback_data=paid_cb)
+            paid_id = s.get("pay_btn_paid_id", "0")
+            if _is_valid_emoji_id(crypto_pay_id):
+                pay_btn = InlineKeyboardButton(text="Оплатить через CryptoBot", url=pay_url, icon_custom_emoji_id=str(crypto_pay_id))
+            else:
+                pay_btn = InlineKeyboardButton(text=f"{crypto_pay_e} Оплатить через CryptoBot" if crypto_pay_e else "Оплатить через CryptoBot", url=pay_url)
+            if _is_valid_emoji_id(paid_id):
+                paid_btn = InlineKeyboardButton(text="Я оплатил", callback_data=paid_cb, icon_custom_emoji_id=str(paid_id))
+            else:
+                paid_btn = InlineKeyboardButton(text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил", callback_data=paid_cb)
             kb = InlineKeyboardMarkup(inline_keyboard=[[pay_btn], [paid_btn]])
             await c.message.edit_text(
                 f"💎 <b>Оплата через CryptoBot</b>\n\nСумма: <b>{usdt} USDT</b>\nТариф: <b>{p['label']}</b>\n\nНажмите кнопку ниже для оплаты, затем нажмите «Я оплатил»",
@@ -1098,18 +1111,18 @@ async def yoo_pay_h(c: CallbackQuery, state: FSMContext):
     pay_url = (f"https://yoomoney.ru/quickpay/confirm.xml?receiver={wallet}"
                f"&quickpay-form=button&targets=VPN+{p['label']}&paymentType=AC&sum={total}&label={label}")
     yoo_pay_e = s.get("pay_btn_yoo_pay_emoji", "💛")
-    if yoo_pay_e and str(yoo_pay_e).strip().isdigit():
-        yoo_pay_e = "💛"
+    yoo_pay_id = s.get("pay_btn_yoo_pay_id", "0")
     paid_e = s.get("pay_btn_paid_emoji", "✅")
-    if paid_e and str(paid_e).strip().isdigit():
-        paid_e = "✅"
+    paid_id = s.get("pay_btn_paid_id", "0")
     paid_cb = f"check_yoo_{label}_{p['code']}_{p['days']}_{total}_{pay_type}"
-    yoo_pay_btn = InlineKeyboardButton(
-        text=f"{yoo_pay_e} Оплатить через ЮMoney" if yoo_pay_e else "Оплатить через ЮMoney",
-        url=pay_url)
-    paid_btn = InlineKeyboardButton(
-        text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил",
-        callback_data=paid_cb)
+    if _is_valid_emoji_id(yoo_pay_id):
+        yoo_pay_btn = InlineKeyboardButton(text="Оплатить через ЮMoney", url=pay_url, icon_custom_emoji_id=str(yoo_pay_id))
+    else:
+        yoo_pay_btn = InlineKeyboardButton(text=f"{yoo_pay_e} Оплатить через ЮMoney" if yoo_pay_e else "Оплатить через ЮMoney", url=pay_url)
+    if _is_valid_emoji_id(paid_id):
+        paid_btn = InlineKeyboardButton(text="Я оплатил", callback_data=paid_cb, icon_custom_emoji_id=str(paid_id))
+    else:
+        paid_btn = InlineKeyboardButton(text=f"{paid_e} Я оплатил" if paid_e else "Я оплатил", callback_data=paid_cb)
     kb = InlineKeyboardMarkup(inline_keyboard=[[yoo_pay_btn], [paid_btn]])
     await c.message.edit_text(
         f"💛 <b>Оплата через ЮMoney</b>\n\nСумма: <b>{total} ₽</b>\nТариф: <b>{p['label']}</b>\n\nНажмите кнопку ниже, затем «Я оплатил»",

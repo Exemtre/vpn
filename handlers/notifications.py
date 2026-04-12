@@ -30,9 +30,9 @@ def _is_valid_emoji_id(eid):
 
 
 def _make_notif_btn(text, callback_data, emoji_id):
-    """Creates an InlineKeyboardButton for a notification.
-    icon_custom_emoji_id is not valid for callback buttons; emoji_id is ignored here.
-    """
+    """Creates an InlineKeyboardButton for a notification, using custom emoji if valid."""
+    if _is_valid_emoji_id(emoji_id):
+        return InlineKeyboardButton(text=text, callback_data=callback_data, icon_custom_emoji_id=str(emoji_id))
     return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
