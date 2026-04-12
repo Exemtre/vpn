@@ -1291,10 +1291,7 @@ async def back_h(c: CallbackQuery):
         except:
             pass
         if gif_sent:
-            try:
-                await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
-            except:
-                pass
+            await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
             await c.answer()
             return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
@@ -1333,10 +1330,7 @@ async def forced_sub_check_cb(c: CallbackQuery):
             except:
                 pass
             if gif_sent:
-                try:
-                    await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
-                except:
-                    pass
+                await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
                 await c.answer("✅ Добро пожаловать!")
                 return
 

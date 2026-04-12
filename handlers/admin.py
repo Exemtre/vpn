@@ -20,6 +20,22 @@ CANCEL_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")]
 ])
 
+# Панель быстрого выбора эмодзи для редактирования символов кнопок
+_QUICK_EMOJIS = [
+    "🌐", "🤝", "🎁", "💳", "📝", "🔙",
+    "✅", "🎟", "🛠", "📄", "🆓", "🔔",
+    "🔒", "🔑", "⚡️", "👤", "💬", "🎯",
+    "🚀", "🌟", "🏆", "💡", "📲", "🔗",
+]
+
+CHAR_EMOJI_KB = InlineKeyboardMarkup(inline_keyboard=[
+    *[
+        [InlineKeyboardButton(text=e, callback_data=f"becs_{i}") for i, e in enumerate(_QUICK_EMOJIS[r:r+6], start=r)]
+        for r in range(0, len(_QUICK_EMOJIS), 6)
+    ],
+    [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")],
+])
+
 
 @admin_router.callback_query(F.data == "admin_cancel_fsm", F.from_user.id.in_(ADMIN_IDS))
 async def admin_cancel_fsm(c: CallbackQuery, state: FSMContext):
@@ -523,10 +539,30 @@ async def be_t_req(c: CallbackQuery, state: FSMContext):
 @admin_router.callback_query(F.data == "be_char")
 async def be_c_req(c: CallbackQuery, state: FSMContext):
     await c.message.answer(
-        "😀 Введите символ эмодзи для кнопки (например 🤝) или «0» для сброса:",
-        reply_markup=CANCEL_KB
+        "😀 <b>Выберите эмодзи из панели</b> или введите свой символ (например 🤝) — «0» для сброса:",
+        reply_markup=CHAR_EMOJI_KB
     )
     await state.set_state(AdminStates.wait_for_btn_char_emoji)
+
+
+@admin_router.callback_query(F.data.startswith("becs_"), F.from_user.id.in_(ADMIN_IDS))
+async def be_char_set(c: CallbackQuery, state: FSMContext):
+    try:
+        idx = int(c.data[5:])
+        emoji = _QUICK_EMOJIS[idx]
+    except (ValueError, IndexError):
+        await c.answer("❌ Неверный выбор.", show_alert=True)
+        return
+    d = await state.get_data()
+    btn = d.get("editing_btn")
+    if not btn:
+        await c.answer("❌ Сессия истекла. Начните заново.", show_alert=True)
+        return
+    _, ek = BTN_MAPPING.get(btn, ("", f"btn_{btn}_emoji"))
+    set_bot_setting(ek, emoji)
+    await state.clear()
+    await c.message.edit_text(f"✅ Эмодзи кнопки установлен: {emoji}")
+    await c.answer()
 
 
 @admin_router.callback_query(F.data == "be_emoji")
