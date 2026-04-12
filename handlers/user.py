@@ -447,10 +447,7 @@ async def cmd_start(message: Message):
         except:
             pass
         if gif_sent:
-            try:
-                await message.answer("\u00a0", reply_markup=get_main_reply_kb(message.from_user.id))
-            except:
-                pass
+            await message.answer("\u00a0", reply_markup=get_main_reply_kb(message.from_user.id))
             return
 
     await message.answer(text, reply_markup=get_main_reply_kb(message.from_user.id))
