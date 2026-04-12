@@ -333,7 +333,7 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
     await _send_active_vpn_screen(user_id, fresh_user, bot=bot)
     # Restore the main reply keyboard so bottom buttons are always visible
     try:
-        await bot.send_message(user_id, "\u2800", reply_markup=get_main_reply_kb(user_id))
+        await bot.send_message(user_id, ".", reply_markup=get_main_reply_kb(user_id))
     except Exception:
         pass
 
@@ -447,11 +447,11 @@ async def cmd_start(message: Message):
         except:
             pass
         if gif_sent:
-            await message.answer("\u2800", reply_markup=get_main_reply_kb(message.from_user.id))
+            await message.answer(".", reply_markup=get_main_reply_kb(message.from_user.id))
             return
 
     await message.answer(text, reply_markup=get_main_reply_kb(message.from_user.id))
-    await message.answer("\u2800", reply_markup=main_menu_kb())
+    await message.answer(".", reply_markup=main_menu_kb())
 
 
 @user_router.message(F.text.endswith("Подключить VPN"))
@@ -1293,11 +1293,11 @@ async def back_h(c: CallbackQuery):
         except:
             pass
         if gif_sent:
-            await c.bot.send_message(c.from_user.id, "\u2800", reply_markup=get_main_reply_kb(c.from_user.id))
+            await c.bot.send_message(c.from_user.id, ".", reply_markup=get_main_reply_kb(c.from_user.id))
             await c.answer()
             return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
-    await c.bot.send_message(c.from_user.id, "\u2800", reply_markup=main_menu_kb())
+    await c.bot.send_message(c.from_user.id, ".", reply_markup=main_menu_kb())
     await c.answer()
 
 
@@ -1332,12 +1332,12 @@ async def forced_sub_check_cb(c: CallbackQuery):
             except:
                 pass
             if gif_sent:
-                await c.bot.send_message(c.from_user.id, "\u2800", reply_markup=get_main_reply_kb(c.from_user.id))
+                await c.bot.send_message(c.from_user.id, ".", reply_markup=get_main_reply_kb(c.from_user.id))
                 await c.answer("✅ Добро пожаловать!")
                 return
 
         await c.bot.send_message(c.from_user.id, text, reply_markup=get_main_reply_kb(c.from_user.id))
-        await c.bot.send_message(c.from_user.id, "\u2800", reply_markup=main_menu_kb())
+        await c.bot.send_message(c.from_user.id, ".", reply_markup=main_menu_kb())
         await c.answer("✅ Добро пожаловать!")
     else:
         await c.answer("❌ Вы ещё не подписались на канал!", show_alert=True)
