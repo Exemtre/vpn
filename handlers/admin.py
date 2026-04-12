@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,10 +9,39 @@ from database.models import (
     set_bot_setting, get_bot_settings, get_stats, get_all_plans,
     update_plan_price, update_plan_link, update_plan_instruction, get_user, toggle_ban_user,
     update_user_balance, get_all_users, create_promo, get_all_promos,
-    add_user_device, get_user_devices, delete_user_device
+    add_user_device, get_user_devices, delete_user_device, revoke_subscription
 )
+from handlers.notifications import check_and_send_notifications
+from marzban import marzban_test_connection
 
 admin_router = Router()
+
+CANCEL_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")]
+])
+
+# Панель быстрого выбора эмодзи для редактирования символов кнопок
+_QUICK_EMOJIS = [
+    "🌐", "🤝", "🎁", "💳", "📝", "🔙",
+    "✅", "🎟", "🛠", "📄", "🆓", "🔔",
+    "🔒", "🔑", "⚡️", "👤", "💬", "🎯",
+    "🚀", "🌟", "🏆", "💡", "📲", "🔗",
+]
+
+CHAR_EMOJI_KB = InlineKeyboardMarkup(inline_keyboard=[
+    *[
+        [InlineKeyboardButton(text=e, callback_data=f"becs_{i}") for i, e in enumerate(_QUICK_EMOJIS[r:r+6], start=r)]
+        for r in range(0, len(_QUICK_EMOJIS), 6)
+    ],
+    [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel_fsm")],
+])
+
+
+@admin_router.callback_query(F.data == "admin_cancel_fsm", F.from_user.id.in_(ADMIN_IDS))
+async def admin_cancel_fsm(c: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await c.message.answer("✅ Действие отменено.")
+    await c.answer()
 
 
 class AdminStates(StatesGroup):
@@ -28,6 +58,7 @@ class AdminStates(StatesGroup):
     wait_for_promo_uses = State()
     wait_for_btn_text = State()
     wait_for_btn_emoji = State()
+    wait_for_btn_char_emoji = State()
     wait_for_global_emoji = State()
     wait_for_info_url = State()
     wait_for_free_link = State()
@@ -36,6 +67,17 @@ class AdminStates(StatesGroup):
     wait_for_dev_emoji = State()  # Эмодзи кнопок устройств
     wait_for_pay_emoji = State()  # Эмодзи кнопок оплаты
     wait_for_kb_emoji = State()   # Эмодзи кнопок главного меню  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
+    wait_for_info_vpn_emoji = State()  # Эмодзи кнопок Инфо и VPN
+    wait_for_notif_text = State()     # Текст уведомления
+    wait_for_notif_btn_text = State() # Текст кнопки уведомления
+    wait_for_notif_hours = State()    # Часы для уведомления
+    wait_for_notif_btn_emoji = State() # ID кастомного эмодзи кнопки уведомления
+    wait_for_forced_sub_channel = State()  # Username/ID обязательного канала
+    wait_for_forced_sub_text = State()     # Текст сообщения обязательной подписки
+    wait_for_marzban_url = State()         # URL сервера Marzban
+    wait_for_marzban_admin_user = State()  # Логин администратора Marzban
+    wait_for_marzban_admin_pass = State()  # Пароль администратора Marzban
+    wait_for_marzban_inbound = State()     # Inbound тег Marzban
 
 def admin_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -51,6 +93,10 @@ def admin_kb():
         [InlineKeyboardButton(text="⌨️ Эмодзи главного меню", callback_data="admin_kb_emoji")],
         [InlineKeyboardButton(text="🔢 Эмодзи кнопок устройств", callback_data="admin_dev_emoji")],
         [InlineKeyboardButton(text="💳 Эмодзи кнопок оплаты", callback_data="admin_pay_emoji")],
+        [InlineKeyboardButton(text="🔔 Эмодзи кнопок Инфо и VPN", callback_data="admin_info_vpn_emoji")],
+        [InlineKeyboardButton(text="🔔 Уведомления", callback_data="admin_notifications")],
+        [InlineKeyboardButton(text="📢 Обязательная подписка", callback_data="admin_forced_sub")],
+        [InlineKeyboardButton(text="🔌 Marzban API", callback_data="admin_marzban")],
         [InlineKeyboardButton(text="🖼 Изменить GIF", callback_data="admin_edit_gif"),
          InlineKeyboardButton(text="🎭 Стикер на старте", callback_data="admin_edit_sticker")],
     ])
@@ -133,6 +179,35 @@ async def admin_user_card(c: CallbackQuery):
         [InlineKeyboardButton(text="💰 Изменить баланс", callback_data=f"adm_editbal_{uid}")],
         [InlineKeyboardButton(text="🚫 Бан / Разбан", callback_data=f"adm_toggleban_{uid}")],
         [InlineKeyboardButton(text="📱 Устройства VPN", callback_data=f"adm_devices_{uid}")],
+        [InlineKeyboardButton(text="❌ Забрать подписку", callback_data=f"adm_revokesub_{uid}")],
+        [InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_page_0")]
+    ])
+    await c.message.edit_text(text, reply_markup=kb)
+
+
+@admin_router.callback_query(F.data.startswith("adm_revokesub_"), F.from_user.id.in_(ADMIN_IDS))
+async def adm_revoke_sub(c: CallbackQuery):
+    uid = c.data.split("_")[2]
+    revoke_subscription(uid)
+    await c.answer("✅ Подписка отозвана", show_alert=True)
+    u = get_user(uid)
+    if not u:
+        return
+    status = "🔴 Забанен" if u['is_banned'] else "🟢 Активен"
+    text = (
+        f"👤 <b>{u['full_name']}</b>\n"
+        f"🆔 ID: <code>{u['user_id']}</code>\n"
+        f"👤 Username: @{u.get('username') or '—'}\n"
+        f"💰 Баланс: <b>{u['balance']} ₽</b>\n"
+        f"🛡 Статус: {status}\n"
+        f"📦 Тариф: {u.get('plan') or 'Нет'}\n"
+        f"📅 Подписка до: {u['sub_expires'][:10] if u['sub_expires'] else 'Нет'}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Изменить баланс", callback_data=f"adm_editbal_{uid}")],
+        [InlineKeyboardButton(text="🚫 Бан / Разбан", callback_data=f"adm_toggleban_{uid}")],
+        [InlineKeyboardButton(text="📱 Устройства VPN", callback_data=f"adm_devices_{uid}")],
+        [InlineKeyboardButton(text="❌ Забрать подписку", callback_data=f"adm_revokesub_{uid}")],
         [InlineKeyboardButton(text="🔙 К списку", callback_data="admin_users_page_0")]
     ])
     await c.message.edit_text(text, reply_markup=kb)
@@ -141,7 +216,7 @@ async def admin_user_card(c: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("adm_editbal_"), F.from_user.id.in_(ADMIN_IDS))
 async def req_bal(c: CallbackQuery, state: FSMContext):
     await state.update_data(target_uid=c.data.split("_")[2])
-    await c.message.answer("Введите сумму (например 500 или -500):")
+    await c.message.answer("Введите сумму (например 500 или -500):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_balance_amount)
 
 
@@ -197,7 +272,7 @@ async def adm_devices_list(c: CallbackQuery):
 async def adm_add_device_ask(c: CallbackQuery, state: FSMContext):
     uid = c.data.split("_")[2]
     await state.update_data(target_uid=uid, devices_msg_id=c.message.message_id)
-    await c.message.answer("Введите название устройства (например: iPhone 15, Windows PC, MacBook):")
+    await c.message.answer("Введите название устройства (например: iPhone 15, Windows PC, MacBook):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_device_name)
     await c.answer()
 
@@ -278,21 +353,25 @@ async def adm_plan_det(c: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "set_p_pr")
 async def r_p_pr(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите новую цену в рублях:")
+    await c.message.answer("Введите новую цену в рублях:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_plan_price)
 
 
 @admin_router.callback_query(F.data == "set_p_li")
 async def r_p_li(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите новую VPN-ссылку для этого тарифа:")
+    await c.message.answer("Введите новую VPN-ссылку для этого тарифа:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_plan_link)
 
 
 @admin_router.message(AdminStates.wait_for_plan_price)
 async def s_p_pr(m: Message, state: FSMContext):
     d = await state.get_data()
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
     try:
-        update_plan_price(d['editing_plan'], int(m.text))
+        update_plan_price(plan_id, int(m.text))
         await m.answer("✅ Цена обновлена!")
         await state.clear()
     except:
@@ -302,7 +381,11 @@ async def s_p_pr(m: Message, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_plan_link)
 async def s_p_li(m: Message, state: FSMContext):
     d = await state.get_data()
-    update_plan_link(d['editing_plan'], m.text.strip())
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
+    update_plan_link(plan_id, m.text.strip())
     await m.answer("✅ Ссылка обновлена!")
     await state.clear()
 
@@ -313,7 +396,8 @@ async def r_p_ins(c: CallbackQuery, state: FSMContext):
         "📋 <b>Введите инструкцию для тарифа</b>\n\n"
         "Этот текст будет показан пользователю после успешной оплаты вместе со ссылкой.\n"
         "Поддерживается HTML: <b>жирный</b>, <i>курсив</i>, <code>код</code>.\n\n"
-        "Отправьте «0» чтобы очистить инструкцию."
+        "Отправьте «0» чтобы очистить инструкцию.",
+        reply_markup=CANCEL_KB
     )
     await state.set_state(AdminStates.wait_for_plan_instruction)
 
@@ -321,8 +405,12 @@ async def r_p_ins(c: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminStates.wait_for_plan_instruction)
 async def s_p_ins(m: Message, state: FSMContext):
     d = await state.get_data()
+    plan_id = d.get('editing_plan')
+    if not plan_id:
+        await state.clear()
+        return await m.answer("❌ Сессия истекла. Начните редактирование заново.")
     text = "" if m.text.strip() == "0" else m.html_text.strip()
-    update_plan_instruction(d['editing_plan'], text)
+    update_plan_instruction(plan_id, text)
     await m.answer("✅ Инструкция обновлена!")
     await state.clear()
 
@@ -355,7 +443,7 @@ async def admin_info_links(c: CallbackQuery):
 async def set_info_url(c: CallbackQuery, state: FSMContext):
     key = c.data.replace("set_info_", "")
     await state.update_data(info_url_key=key)
-    await c.message.answer("Введите URL (или «0» чтобы очистить):")
+    await c.message.answer("Введите URL (или «0» чтобы очистить):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_info_url)
 
 
@@ -371,27 +459,29 @@ async def save_info_url(m: Message, state: FSMContext):
 # ─── РЕДАКТОР КНОПОК ──────────────────────────────────────────────────────────
 
 BTN_MAPPING = {
-    "vpn":      ("btn_vpn",      "btn_vpn_emoji"),
-    "ref":      ("btn_ref",      "btn_ref_emoji"),
-    "gift":     ("btn_gift",     "btn_gift_emoji"),
-    "prof_buy": ("btn_prof_buy", "btn_prof_buy_emoji"),
-    "agree":    ("btn_agree",    "btn_agree_emoji"),
-    "supp":     ("btn_supp",     "btn_supp_emoji"),
-    "free":     ("btn_free",     "btn_free_emoji"),
-    "promo":    ("btn_promo",    "btn_promo_emoji"),
-    "back":     ("btn_back",     "btn_back_emoji"),
+    "vpn":       ("btn_vpn",       "btn_vpn_emoji"),
+    "ref":       ("btn_ref",       "btn_ref_emoji"),
+    "gift":      ("btn_gift",      "btn_gift_emoji"),
+    "gift_make": ("btn_gift_make", "btn_gift_make_emoji"),
+    "prof_buy":  ("btn_prof_buy",  "btn_prof_buy_emoji"),
+    "agree":     ("btn_agree",     "btn_agree_emoji"),
+    "supp":      ("btn_supp",      "btn_supp_emoji"),
+    "free":      ("btn_free",      "btn_free_emoji"),
+    "promo":     ("btn_promo",     "btn_promo_emoji"),
+    "back":      ("btn_back",      "btn_back_emoji"),
 }
 
 BTN_LABELS = {
-    "vpn":      "🌐 Управление VPN",
-    "ref":      "🤝 Пригласить",
-    "gift":     "🎁 Подарить",
-    "prof_buy": "💳 Оформить (Профиль)",
-    "agree":    "📄 Соглашение",
-    "supp":     "🛠 Поддержка",
-    "free":     "✅ Бесплатно",
-    "promo":    "🎟 Промокод",
-    "back":     "🔙 Вернуться/Назад",
+    "vpn":       "🌐 Управление VPN",
+    "ref":       "🤝 Пригласить",
+    "gift":      "🎁 Подарить (меню)",
+    "gift_make": "🎁 Сделать подарок",
+    "prof_buy":  "💳 Оформить (Профиль)",
+    "agree":     "📄 Соглашение",
+    "supp":      "🛠 Поддержка",
+    "free":      "✅ Бесплатно",
+    "promo":     "🎟 Промокод",
+    "back":      "🔙 Вернуться/Назад",
 }
 
 
@@ -417,29 +507,67 @@ async def admin_btn_sub(c: CallbackQuery, state: FSMContext):
     tk, ek = BTN_MAPPING.get(btn, (f"btn_{btn}", f"btn_{btn}_emoji"))
     cur_text = s.get(tk, "—")
     cur_emoji = s.get(ek, "0")
+    # Determine emoji display status
+    if cur_emoji and cur_emoji != "0" and str(cur_emoji).strip().isdigit():
+        emoji_status = f"Кастомный ID: <code>{cur_emoji}</code>"
+    elif cur_emoji and cur_emoji != "0":
+        emoji_status = f"Символ: {cur_emoji}"
+    else:
+        emoji_status = "Эмодзи не задан"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Изменить текст", callback_data="be_text")],
-        [InlineKeyboardButton(text="🎭 Изменить кастомный эмодзи (ID)", callback_data="be_emoji")],
+        [InlineKeyboardButton(text="😀 Изменить символ эмодзи", callback_data="be_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="be_emoji")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_select_btn_to_edit")]
     ])
     await c.message.edit_text(
         f"✏️ <b>Настройка кнопки: {BTN_LABELS.get(btn, btn)}</b>\n\n"
         f"Текущий текст: <b>{cur_text}</b>\n"
-        f"Текущий Emoji ID: <code>{cur_emoji}</code>\n\n"
-        "💡 Для кастомного эмодзи — скопируйте ID эмодзи из любого сета в Telegram.",
+        f"Текущий эмодзи: {emoji_status}\n\n"
+        "💡 <b>Символ</b> — любой юникод эмодзи (например 🤝).\n"
+        "<b>Кастомный ID</b> — числовой ID эмодзи из Premium-сета Telegram.",
         reply_markup=kb
     )
 
 
 @admin_router.callback_query(F.data == "be_text")
 async def be_t_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("✏️ Введите новый текст кнопки:")
+    await c.message.answer("✏️ Введите новый текст кнопки:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_btn_text)
+
+
+@admin_router.callback_query(F.data == "be_char")
+async def be_c_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer(
+        "😀 <b>Выберите эмодзи из панели</b> или введите свой символ (например 🤝) — «0» для сброса:",
+        reply_markup=CHAR_EMOJI_KB
+    )
+    await state.set_state(AdminStates.wait_for_btn_char_emoji)
+
+
+@admin_router.callback_query(F.data.startswith("becs_"), F.from_user.id.in_(ADMIN_IDS))
+async def be_char_set(c: CallbackQuery, state: FSMContext):
+    try:
+        idx = int(c.data[5:])
+        emoji = _QUICK_EMOJIS[idx]
+    except (ValueError, IndexError):
+        await c.answer("❌ Неверный выбор.", show_alert=True)
+        return
+    d = await state.get_data()
+    btn = d.get("editing_btn")
+    if not btn:
+        await c.answer("❌ Сессия истекла. Начните заново.", show_alert=True)
+        return
+    _, ek = BTN_MAPPING.get(btn, ("", f"btn_{btn}_emoji"))
+    set_bot_setting(ek, emoji)
+    await state.clear()
+    await c.message.edit_text(f"✅ Эмодзи кнопки установлен: {emoji}")
+    await c.answer()
 
 
 @admin_router.callback_query(F.data == "be_emoji")
 async def be_e_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("🎭 Введите ID кастомного эмодзи (число) или «0» для сброса:")
+    await c.message.answer("🎭 Введите ID кастомного эмодзи (число) или «0» для сброса:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_btn_emoji)
 
 
@@ -456,9 +584,33 @@ async def bs_t(m: Message, state: FSMContext):
 async def bs_e(m: Message, state: FSMContext):
     d = await state.get_data()
     _, ek = BTN_MAPPING.get(d['editing_btn'], ("", f"btn_{d['editing_btn']}_emoji"))
-    val = "0" if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(ek, val)
-    await m.answer("✅ Эмодзи обновлён!")
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(ek, "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        set_bot_setting(ek, val)
+        await m.answer("✅ Кастомный ID сохранён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_btn_char_emoji)
+async def bs_c(m: Message, state: FSMContext):
+    d = await state.get_data()
+    _, ek = BTN_MAPPING.get(d['editing_btn'], ("", f"btn_{d['editing_btn']}_emoji"))
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(ek, "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        await m.answer("❌ Для числового ID используйте «Кастомный ID»! Введите символ (например 🤝) или «0» для сброса.")
+        return
+    else:
+        set_bot_setting(ek, val)
+        await m.answer(f"✅ Символ эмодзи обновлён: {val}")
     await state.clear()
 
 
@@ -469,6 +621,9 @@ GLOBAL_EMOJI_KEYS = {
     "ge_profile":     "Эмодзи профиля в инлайн-меню (замена 👤)",
     "ge_info":        "Эмодзи информации (замена ℹ️)",
     "ge_ref":         "Эмодзи рефералки (замена 🤝)",
+    "ge_ref_card":    "Эмодзи бонуса в рефералке (замена 💳)",
+    "ge_ref_people":  "Эмодзи счётчика рефералов (замена 👥)",
+    "ge_ref_target":  "Эмодзи ссылки в рефералке (замена 🎯)",
     "ge_payment":     "Эмодзи оплаты (замена 💳)",
     "ge_success":     "Эмодзи успешной оплаты (замена 🎉)",
     # Профиль пользователя
@@ -477,6 +632,30 @@ GLOBAL_EMOJI_KEYS = {
     "ge_sub_active":  "Эмодзи активной подписки (замена ✅)",
     "ge_sub_no":      "Эмодзи отсутствия подписки (замена ❌)",
     "ge_free_server": "Эмодзи бесплатного сервера (замена 🆓)",
+    "ge_plan_label":  "Эмодзи тарифа в профиле (замена 📦)",
+    # Экран активной подписки
+    "ge_active_sub":  "Эмодзи заголовка подписки (замена 🔐)",
+    "ge_vpn_link":    "Эмодзи ключа VPN (замена 🔗)",
+    "ge_sub_url":     "Эмодзи ссылки подписки (замена 🌐)",
+    "ge_active_hint": "Эмодзи подсказки подключения (замена 💡)",
+    # Сообщение об оплате / выставлении счёта
+    "ge_pay_success": "Эмодзи заголовка оплаты (замена ⭐)",
+    "ge_pay_price":   "Эмодзи стоимости (замена 💰)",
+    "ge_pay_expires": "Эмодзи даты подписки (замена 📅)",
+    "ge_pay_plan":    "Эмодзи плана в оплате (замена 📦)",
+    "ge_pay_method":  "Эмодзи метода оплаты (замена 💳)",
+    "ge_pay_num":     "Эмодзи номера оплаты (замена 🔢)",
+    "ge_pay_link":    "Эмодзи ключа в оплате (замена 🔗)",
+    "ge_pay_note":    "Эмодзи примечания оплаты (замена 📝)",
+    # Обязательная подписка на канал
+    "ge_forced_sub_btn":       "Эмодзи кнопки «Подписаться» (замена 📢)",
+    "ge_forced_sub_check_btn": "Эмодзи кнопки «Я подписался» (замена ✅)",
+    # Экран выбора оплаты
+    "ge_invoice":     "Эмодзи счёта (замена 💳 в строке «Счёт:»)",
+    "ge_pay_balance": "Эмодзи кнопки «Баланс» при оплате (замена 💰)",
+    # Экран подключённых устройств (Marzban статус)
+    "ge_mz_header":   "Эмодзи заголовка статуса устройств (замена 📡)",
+    "ge_mz_bullet":   "Эмодзи строк статуса устройств (замена 🔹)",
 }
 
 
@@ -504,26 +683,33 @@ async def set_global_emoji(c: CallbackQuery, state: FSMContext):
     key = c.data.replace("setge_", "")
     await state.update_data(ge_key=key)
     label = GLOBAL_EMOJI_KEYS.get(key, key)
-    await c.message.answer(f"Введите ID кастомного эмодзи для:\n<b>{label}</b>\n\n(«0» для сброса)")
+    await c.message.answer(f"Введите ID кастомного эмодзи для:\n<b>{label}</b>\n\n(«0» для сброса)", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_global_emoji)
 
 
 @admin_router.message(AdminStates.wait_for_global_emoji)
 async def save_global_emoji(m: Message, state: FSMContext):
     d = await state.get_data()
-    val = "0" if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(d['ge_key'], val)
-    await m.answer("✅ Эмодзи сохранён!")
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(d['ge_key'], "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        set_bot_setting(d['ge_key'], val)
+        await m.answer("✅ Эмодзи сохранён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
     await state.clear()
 
 
 # ─── ЭМОДЗИ ГЛАВНЫХ КНОПОК МЕНЮ ──────────────────────────────────────────────
 
 KB_EMOJI_MAP = {
-    "kb_vpn_emoji":    ("⚡️", "⚡️ Подключить VPN"),
-    "kb_profile_emoji": ("👤", "👤 Профиль"),
-    "kb_info_emoji":   ("ℹ️", "ℹ️ Информация"),
-    "kb_admin_emoji":  ("🔧", "🔧 Администрирование"),
+    "kb_vpn_emoji":     ("⚡️", "⚡️ Подключить VPN",      "kb_vpn_emoji_id"),
+    "kb_profile_emoji": ("👤", "👤 Профиль",              "kb_profile_emoji_id"),
+    "kb_info_emoji":    ("ℹ️", "ℹ️ Информация",          "kb_info_emoji_id"),
+    "kb_admin_emoji":   ("🔧", "🔧 Администрирование",   "kb_admin_emoji_id"),
 }
 
 
@@ -531,17 +717,21 @@ KB_EMOJI_MAP = {
 async def admin_kb_emoji_menu(c: CallbackQuery):
     s = get_bot_settings()
     kb = []
-    for key, (default, label) in KB_EMOJI_MAP.items():
-        cur = s.get(key, default)
+    for key, (default, label, id_key) in KB_EMOJI_MAP.items():
+        cur_char = s.get(key, default)
+        cur_id   = s.get(id_key, "0")
+        id_str   = f"✅ кастом. ID:{cur_id}" if cur_id and cur_id != "0" else "стандарт"
         kb.append([InlineKeyboardButton(
-            text=f"{label}  →  сейчас: {cur}",
+            text=f"{label}  →  {cur_char} ({id_str})",
             callback_data=f"setkbe_{key}"
         )])
     kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     await c.message.edit_text(
         "⌨️ <b>Эмодзи кнопок главного меню</b>\n\n"
-        "Введите любой эмодзи (юникод) — он появится на кнопке вместо стандартного.\n\n"
-        "⚠️ Цвет фона кнопок задаётся темой Telegram и не может быть изменён ботом.",
+        "Для каждой кнопки можно задать:\n"
+        "• <b>Эмодзи-символ</b> — отображается в reply-клавиатуре (снизу экрана)\n"
+        "• <b>ID кастомного эмодзи</b> (Premium) — отображается в inline-кнопках меню\n\n"
+        "⚠️ Telegram не поддерживает кастомные эмодзи в reply-клавиатуре.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
     )
 
@@ -549,24 +739,68 @@ async def admin_kb_emoji_menu(c: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("setkbe_"), F.from_user.id.in_(ADMIN_IDS))
 async def set_kb_emoji_req(c: CallbackQuery, state: FSMContext):
     key = c.data.replace("setkbe_", "")
-    default, label = KB_EMOJI_MAP.get(key, ("", key))
-    await state.update_data(kb_emoji_key=key)
-    await c.message.answer(
-        f"Кнопка: <b>{label}</b>\n\n"
-        f"Введите новый эмодзи для кнопки (например: 🚀 🔥 💫)\n"
-        f"или «0» для сброса к стандартному ({default}):"
+    default, label, id_key = KB_EMOJI_MAP.get(key, ("", key, ""))
+    await state.update_data(kb_emoji_key=key, kb_emoji_id_key=id_key, kb_emoji_default=default)
+    s = get_bot_settings()
+    cur_char = s.get(key, default)
+    cur_id   = s.get(id_key, "0")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="😀 Изменить эмодзи (символ)", callback_data="kbemoji_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="kbemoji_id")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_kb_emoji")],
+    ])
+    await c.message.edit_text(
+        f"🔧 <b>Кнопка: {label}</b>\n\n"
+        f"Текущий символ: {cur_char}\n"
+        f"Кастомный ID: <code>{cur_id}</code>",
+        reply_markup=kb
     )
+
+
+@admin_router.callback_query(F.data == "kbemoji_char", F.from_user.id.in_(ADMIN_IDS))
+async def kbemoji_char_req(c: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    default = d.get("kb_emoji_default", "")
+    await c.message.answer(
+        f"Введите новый эмодзи-символ (например ⚡️) или «0» для сброса к стандартному ({default}):",
+        reply_markup=CANCEL_KB
+    )
+    await state.update_data(kb_save_mode="char")
     await state.set_state(AdminStates.wait_for_kb_emoji)
+    await c.answer()
+
+
+@admin_router.callback_query(F.data == "kbemoji_id", F.from_user.id.in_(ADMIN_IDS))
+async def kbemoji_id_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:", reply_markup=CANCEL_KB)
+    await state.update_data(kb_save_mode="id")
+    await state.set_state(AdminStates.wait_for_kb_emoji)
+    await c.answer()
 
 
 @admin_router.message(AdminStates.wait_for_kb_emoji)
 async def save_kb_emoji(m: Message, state: FSMContext):
     d = await state.get_data()
-    key = d['kb_emoji_key']
-    default = KB_EMOJI_MAP.get(key, ("",))[0]
-    val = default if m.text.strip() == "0" else m.text.strip()
-    set_bot_setting(key, val)
-    await m.answer(f"✅ Эмодзи кнопки обновлён: {val}")
+    mode    = d.get("kb_save_mode", "char")
+    key     = d.get("kb_emoji_key", "")
+    id_key  = d.get("kb_emoji_id_key", "")
+    default = d.get("kb_emoji_default", "")
+
+    if mode == "char":
+        val = default if m.text.strip() == "0" else m.text.strip()
+        set_bot_setting(key, val)
+        await m.answer(f"✅ Эмодзи-символ обновлён: {val}")
+    else:
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -574,9 +808,13 @@ async def save_kb_emoji(m: Message, state: FSMContext):
 # ─── ЭМОДЗИ КНОПОК ОПЛАТЫ ─────────────────────────────────────────────────────
 
 PAY_EMOJI_MAP = {
-    "kb_pay_stars_emoji":  ("⭐️", "⭐️ Telegram Stars",  "kb_pay_stars_id"),
-    "kb_pay_yoo_emoji":    ("💛", "💛 ЮMoney",           "kb_pay_yoo_id"),
-    "kb_pay_crypto_emoji": ("💎", "💎 CryptoBot",        "kb_pay_crypto_id"),
+    "kb_plan_emoji":           ("🗓", "🗓 Тариф (кнопки выбора тарифа)",  "kb_plan_emoji_id"),
+    "kb_pay_stars_emoji":      ("⭐️", "⭐️ Telegram Stars (выбор тарифа)", "kb_pay_stars_id"),
+    "kb_pay_yoo_emoji":        ("💛", "💛 ЮMoney (выбор тарифа)",          "kb_pay_yoo_id"),
+    "kb_pay_crypto_emoji":     ("💎", "💎 CryptoBot (выбор тарифа)",       "kb_pay_crypto_id"),
+    "pay_btn_crypto_pay_emoji":("💎", "💎 Оплатить через CryptoBot",       "pay_btn_crypto_pay_id"),
+    "pay_btn_yoo_pay_emoji":   ("💛", "💛 Оплатить через ЮMoney",          "pay_btn_yoo_pay_id"),
+    "pay_btn_paid_emoji":      ("✅", "✅ Я оплатил",                      "pay_btn_paid_id"),
 }
 
 
@@ -626,7 +864,7 @@ async def set_pay_emoji_req(c: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "payemoji_char", F.from_user.id.in_(ADMIN_IDS))
 async def payemoji_char_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите новый эмодзи-символ (например 💰) или «0» для сброса:")
+    await c.message.answer("Введите новый эмодзи-символ (например 💰) или «0» для сброса:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_pay_emoji)
     await state.update_data(pay_save_mode="char")
     await c.answer()
@@ -634,7 +872,7 @@ async def payemoji_char_req(c: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "payemoji_id", F.from_user.id.in_(ADMIN_IDS))
 async def payemoji_id_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:")
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_pay_emoji)
     await state.update_data(pay_save_mode="id")
     await c.answer()
@@ -653,9 +891,16 @@ async def save_pay_emoji(m: Message, state: FSMContext):
         set_bot_setting(key, val)
         await m.answer(f"✅ Эмодзи обновлён: {val}")
     else:
-        val = "0" if m.text.strip() == "0" else m.text.strip()
-        set_bot_setting(id_key, val)
-        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
@@ -714,7 +959,7 @@ async def set_dev_emoji_req(c: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "devemoji_char", F.from_user.id.in_(ADMIN_IDS))
 async def devemoji_char_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите новый эмодзи-символ (например 🔻) или «0» для сброса:")
+    await c.message.answer("Введите новый эмодзи-символ (например 🔻) или «0» для сброса:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_dev_emoji)
     await state.update_data(dev_save_mode="char")
     await c.answer()
@@ -722,7 +967,7 @@ async def devemoji_char_req(c: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "devemoji_id", F.from_user.id.in_(ADMIN_IDS))
 async def devemoji_id_req(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:")
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_dev_emoji)
     await state.update_data(dev_save_mode="id")
     await c.answer()
@@ -741,13 +986,329 @@ async def save_dev_emoji(m: Message, state: FSMContext):
         set_bot_setting(key, val)
         await m.answer(f"✅ Эмодзи обновлён: {val}")
     else:
-        val = "0" if m.text.strip() == "0" else m.text.strip()
-        set_bot_setting(id_key, val)
-        await m.answer("✅ Кастомный ID сохранён!" if val != "0" else "✅ Кастомный ID сброшен.")
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
     await state.clear()
 
 
-# ─── ПЛАТЁЖНЫЕ СИСТЕМЫ ────────────────────────────────────────────────────────
+# ─── ЭМОДЗИ КНОПОК ИНФО И АКТИВНОГО VPN ──────────────────────────────────────
+
+INFO_VPN_EMOJI_MAP = {
+    "btn_info_agree_emoji":   ("📄", "📄 Соглашение (Инфо)",             "btn_info_agree_emoji_id"),
+    "btn_info_privacy_emoji": ("🔒", "🔒 Конфиденциальность (Инфо)",     "btn_info_privacy_emoji_id"),
+    "btn_info_refund_emoji":  ("💰", "💰 Возврат (Инфо)",                "btn_info_refund_emoji_id"),
+    "btn_info_support_emoji": ("🛠", "🛠 Поддержка (Инфо)",              "btn_info_support_emoji_id"),
+    "btn_info_channel_emoji": ("📢", "📢 Канал (Инфо)",                   "btn_info_channel_emoji_id"),
+    "btn_info_install_emoji": ("📲", "📲 Инструкция (Инфо)",             "btn_info_install_emoji_id"),
+    "btn_install_vpn_emoji":  ("📲", "📲 Установить VPN (Активный VPN)", "btn_install_vpn_emoji_id"),
+    "btn_devices_emoji":      ("📱", "📱 Устройства (Активный VPN)",     "btn_devices_emoji_id"),
+    "btn_renew_emoji":        ("🔄", "🔄 Продлить (Активный VPN)",       "btn_renew_emoji_id"),
+}
+
+
+@admin_router.callback_query(F.data == "admin_info_vpn_emoji", F.from_user.id.in_(ADMIN_IDS))
+async def admin_info_vpn_emoji_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    kb = []
+    for key, (default, label, id_key) in INFO_VPN_EMOJI_MAP.items():
+        cur_emoji = s.get(key, default)
+        cur_id = s.get(id_key, "0")
+        id_str = f"✅ кастом. ID:{cur_id}" if cur_id and cur_id != "0" else "стандарт"
+        kb.append([InlineKeyboardButton(
+            text=f"{label}  →  {cur_emoji} ({id_str})",
+            callback_data=f"setivpe_{key}"
+        )])
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
+    await c.message.edit_text(
+        "🔔 <b>Эмодзи кнопок Инфо и Активного VPN</b>\n\n"
+        "Для каждой кнопки можно задать:\n"
+        "• <b>Эмодзи</b> — любой юникод символ (отображается в тексте кнопки)\n"
+        "• <b>ID кастомного эмодзи</b> (Premium) — для анимированного\n\n"
+        "💡 Кнопки Инфо отображаются в разделе «Информация».\n"
+        "Кнопки Активный VPN — в экране с активной подпиской.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+    )
+
+
+@admin_router.callback_query(F.data.startswith("setivpe_"), F.from_user.id.in_(ADMIN_IDS))
+async def set_info_vpn_emoji_req(c: CallbackQuery, state: FSMContext):
+    key = c.data.replace("setivpe_", "")
+    default, label, id_key = INFO_VPN_EMOJI_MAP.get(key, ("", key, ""))
+    await state.update_data(ivp_emoji_key=key, ivp_emoji_id_key=id_key, ivp_emoji_default=default)
+    s = get_bot_settings()
+    cur_e = s.get(key, default)
+    cur_id = s.get(id_key, "0")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="😀 Изменить эмодзи (символ)", callback_data="ivpemoji_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="ivpemoji_id")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_info_vpn_emoji")],
+    ])
+    await c.message.edit_text(
+        f"🔧 <b>Кнопка: {label}</b>\n\n"
+        f"Текущий эмодзи: {cur_e}\n"
+        f"Кастомный ID: <code>{cur_id}</code>",
+        reply_markup=kb
+    )
+
+
+@admin_router.callback_query(F.data == "ivpemoji_char", F.from_user.id.in_(ADMIN_IDS))
+async def ivpemoji_char_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите новый эмодзи-символ (например 📲) или «0» для сброса:", reply_markup=CANCEL_KB)
+    await state.set_state(AdminStates.wait_for_info_vpn_emoji)
+    await state.update_data(ivp_save_mode="char")
+    await c.answer()
+
+
+@admin_router.callback_query(F.data == "ivpemoji_id", F.from_user.id.in_(ADMIN_IDS))
+async def ivpemoji_id_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer("Введите ID кастомного эмодзи (число) или «0» для сброса:", reply_markup=CANCEL_KB)
+    await state.set_state(AdminStates.wait_for_info_vpn_emoji)
+    await state.update_data(ivp_save_mode="id")
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_info_vpn_emoji)
+async def save_info_vpn_emoji(m: Message, state: FSMContext):
+    d = await state.get_data()
+    mode    = d.get("ivp_save_mode", "char")
+    key     = d.get("ivp_emoji_key", "")
+    id_key  = d.get("ivp_emoji_id_key", "")
+    default = d.get("ivp_emoji_default", "")
+
+    if mode == "char":
+        val = default if m.text.strip() == "0" else m.text.strip()
+        set_bot_setting(key, val)
+        await m.answer(f"✅ Эмодзи обновлён: {val}")
+    else:
+        val = m.text.strip()
+        if val == "0":
+            set_bot_setting(id_key, "0")
+            await m.answer("✅ Кастомный ID сброшен.")
+        elif val.isdigit():
+            set_bot_setting(id_key, val)
+            await m.answer("✅ Кастомный ID сохранён!")
+        else:
+            await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+            return
+    await state.clear()
+
+
+# ─── УВЕДОМЛЕНИЯ ──────────────────────────────────────────────────────────────
+
+_NOTIF_DEFAULTS = {
+    "expiry": {
+        "enabled_key": "notif_expiry_enabled",
+        "text_key":    "notif_expiry_text",
+        "btn_key":     "notif_expiry_btn",
+        "hours_key":   "notif_expiry_hours",
+        "btn_emoji_key": "notif_expiry_btn_emoji_id",
+        "label":       "⚠️ Подписка истекает",
+        "default_text": (
+            "⚠️ Завтра закончится ваша подписка на Anonch VPN\n\n"
+            "Автоматического продления нет! Чтобы не остаться без связи, "
+            "продлите свою подписку в разделе /profile"
+        ),
+        "default_btn":   "📋 Перейти к продлению",
+        "default_hours": "24",
+    },
+    "noconn": {
+        "enabled_key": "notif_noconn_enabled",
+        "text_key":    "notif_noconn_text",
+        "btn_key":     "notif_noconn_btn",
+        "hours_key":   "notif_noconn_hours",
+        "btn_emoji_key": "notif_noconn_btn_emoji_id",
+        "label":       "🤖 Не подключился",
+        "default_text": (
+            "🤖 Мы заметили, что вы еще не подключились\n\n"
+            "Если возникли сложности — напишите в поддержку. Мы всегда готовы помочь!"
+        ),
+        "default_btn":   "Подключиться",
+        "default_hours": "2",
+    },
+}
+
+
+def _notif_kb(s):
+    """Строит клавиатуру для панели уведомлений."""
+    kb = []
+    for ntype, cfg in _NOTIF_DEFAULTS.items():
+        enabled = s.get(cfg["enabled_key"], "1") == "1"
+        status = "✅ Вкл" if enabled else "❌ Выкл"
+        hours = s.get(cfg["hours_key"], cfg["default_hours"])
+        hours_label = f"за {hours}ч" if ntype == "expiry" else f"через {hours}ч"
+        emoji_id = s.get(cfg["btn_emoji_key"], "0")
+        emoji_str = f"✅ ID:{emoji_id}" if emoji_id and emoji_id != "0" else "❌ Не задан"
+        kb.append([InlineKeyboardButton(
+            text=f"{cfg['label']} ({hours_label}) — {status}",
+            callback_data=f"notif_toggle_{ntype}"
+        )])
+        kb.append([
+            InlineKeyboardButton(text="✏️ Текст", callback_data=f"notif_edit_{ntype}_text"),
+            InlineKeyboardButton(text="📋 Кнопка", callback_data=f"notif_edit_{ntype}_btn"),
+            InlineKeyboardButton(text="⏰ Часы", callback_data=f"notif_edit_{ntype}_hours"),
+        ])
+        kb.append([
+            InlineKeyboardButton(
+                text=f"🎭 Эмодзи кнопки: {emoji_str}",
+                callback_data=f"notif_edit_{ntype}_btn_emoji"
+            ),
+        ])
+    kb.append([InlineKeyboardButton(text="📨 Отправить сейчас", callback_data="notif_send_now")])
+    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@admin_router.callback_query(F.data == "admin_notifications", F.from_user.id.in_(ADMIN_IDS))
+async def admin_notifications_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    lines = ["🔔 <b>Управление уведомлениями</b>\n"]
+    for ntype, cfg in _NOTIF_DEFAULTS.items():
+        enabled = s.get(cfg["enabled_key"], "1") == "1"
+        hours = s.get(cfg["hours_key"], cfg["default_hours"])
+        hours_label = f"за {hours}ч до истечения" if ntype == "expiry" else f"через {hours}ч после активации"
+        text_preview = s.get(cfg["text_key"], cfg["default_text"])[:60] + "..."
+        lines.append(
+            f"<b>{cfg['label']}</b>\n"
+            f"Статус: {'✅ Включено' if enabled else '❌ Выключено'} | Отправка: {hours_label}\n"
+            f"Текст: {text_preview}\n"
+        )
+    await c.message.edit_text("\n".join(lines), reply_markup=_notif_kb(s))
+
+
+@admin_router.callback_query(F.data == "notif_send_now", F.from_user.id.in_(ADMIN_IDS))
+async def notif_send_now(c: CallbackQuery):
+    await c.answer("⏳ Запускаю рассылку уведомлений...")
+    asyncio.create_task(check_and_send_notifications(c.bot))
+    await c.message.answer("✅ Уведомления запущены в фоне!")
+
+
+@admin_router.callback_query(F.data.startswith("notif_toggle_"), F.from_user.id.in_(ADMIN_IDS))
+async def notif_toggle(c: CallbackQuery):
+    ntype = c.data.replace("notif_toggle_", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype)
+    if not cfg:
+        return await c.answer("Неизвестный тип")
+    s = get_bot_settings()
+    current = s.get(cfg["enabled_key"], "1")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting(cfg["enabled_key"], new_val)
+    await c.answer("✅ Включено" if new_val == "1" else "❌ Выключено")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_notif_kb(s))
+
+
+@admin_router.callback_query(F.data.startswith("notif_edit_"), F.from_user.id.in_(ADMIN_IDS))
+async def notif_edit_req(c: CallbackQuery, state: FSMContext):
+    parts = c.data.split("_")  # notif_edit_<type>_<field>
+    ntype = parts[2]
+    field = parts[3]
+    cfg = _NOTIF_DEFAULTS.get(ntype)
+    if not cfg:
+        return await c.answer("Неизвестный тип")
+    await state.update_data(notif_type=ntype, notif_field=field)
+    s = get_bot_settings()
+    if field == "text":
+        cur = s.get(cfg["text_key"], cfg["default_text"])
+        await c.message.answer(
+            f"✏️ <b>Текст уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущий текст:\n{cur}\n\n"
+            "Введите новый текст (HTML поддерживается):",
+            reply_markup=CANCEL_KB
+        )
+        await state.set_state(AdminStates.wait_for_notif_text)
+    elif field == "btn":
+        cur = s.get(cfg["btn_key"], cfg["default_btn"])
+        await c.message.answer(
+            f"📋 <b>Текст кнопки уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущий текст кнопки: <b>{cur}</b>\n\n"
+            "Введите новый текст кнопки:",
+            reply_markup=CANCEL_KB
+        )
+        await state.set_state(AdminStates.wait_for_notif_btn_text)
+    elif field == "hours":
+        cur = s.get(cfg["hours_key"], cfg["default_hours"])
+        hint = "до истечения подписки" if ntype == "expiry" else "после активации подписки"
+        await c.message.answer(
+            f"⏰ <b>Часы отправки уведомления «{cfg['label']}»</b>\n\n"
+            f"Текущее значение: <b>{cur}ч</b> ({hint})\n\n"
+            "Введите новое количество часов (целое число):",
+            reply_markup=CANCEL_KB
+        )
+        await state.set_state(AdminStates.wait_for_notif_hours)
+    elif field == "btn_emoji":
+        cur = s.get(cfg["btn_emoji_key"], "0")
+        cur_str = f"<code>{cur}</code>" if cur and cur != "0" else "❌ Не задан"
+        await c.message.answer(
+            f"🎭 <b>Кастомный эмодзи кнопки «{cfg['label']}»</b>\n\n"
+            f"Текущий ID: {cur_str}\n\n"
+            "Введите ID кастомного эмодзи (число) или «0» для сброса:",
+            reply_markup=CANCEL_KB
+        )
+        await state.set_state(AdminStates.wait_for_notif_btn_emoji)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_notif_text)
+async def save_notif_text(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    set_bot_setting(cfg.get("text_key", ""), m.html_text.strip())
+    await m.answer("✅ Текст уведомления обновлён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_btn_text)
+async def save_notif_btn_text(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    set_bot_setting(cfg.get("btn_key", ""), m.text.strip())
+    await m.answer("✅ Текст кнопки уведомления обновлён!")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_btn_emoji)
+async def save_notif_btn_emoji(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(cfg.get("btn_emoji_key", ""), "0")
+        await m.answer("✅ Эмодзи кнопки сброшен.")
+    elif val.isdigit():
+        set_bot_setting(cfg.get("btn_emoji_key", ""), val)
+        await m.answer("✅ Эмодзи кнопки уведомления обновлён!")
+    else:
+        await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
+        return
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_notif_hours)
+async def save_notif_hours(m: Message, state: FSMContext):
+    d = await state.get_data()
+    ntype = d.get("notif_type", "")
+    cfg = _NOTIF_DEFAULTS.get(ntype, {})
+    try:
+        val = int(m.text.strip())
+        if val < 1:
+            raise ValueError
+        set_bot_setting(cfg.get("hours_key", ""), str(val))
+        await m.answer(f"✅ Часы обновлены: {val}ч")
+        await state.clear()
+    except (ValueError, TypeError):
+        await m.answer("❌ Введите целое положительное число!")
+
 
 @admin_router.callback_query(F.data == "admin_payments", F.from_user.id.in_(ADMIN_IDS))
 async def admin_payments_menu(c: CallbackQuery):
@@ -801,7 +1362,7 @@ async def cfg_payment_sys(c: CallbackQuery):
 async def set_pay_key(c: CallbackQuery, state: FSMContext):
     key = c.data.replace("setp_", "")
     await state.update_data(epk=key)
-    await c.message.answer("Введите значение (или «0» для очистки):")
+    await c.message.answer("Введите значение (или «0» для очистки):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_payment_setting)
 
 
@@ -833,14 +1394,14 @@ async def adm_promos_menu(c: CallbackQuery):
 
 @admin_router.callback_query(F.data == "admin_create_promo", F.from_user.id.in_(ADMIN_IDS))
 async def adm_create_promo(c: CallbackQuery, state: FSMContext):
-    await c.message.answer("Введите название промокода (буквы/цифры, будет в верхнем регистре):")
+    await c.message.answer("Введите название промокода (буквы/цифры, будет в верхнем регистре):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_promo_name)
 
 
 @admin_router.message(AdminStates.wait_for_promo_name)
 async def adm_pr_n(m: Message, state: FSMContext):
     await state.update_data(pn=m.text.strip().upper())
-    await m.answer("Введите сумму пополнения баланса (рублей):")
+    await m.answer("Введите сумму пополнения баланса (рублей):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_promo_value)
 
 
@@ -848,7 +1409,7 @@ async def adm_pr_n(m: Message, state: FSMContext):
 async def adm_pr_v(m: Message, state: FSMContext):
     try:
         await state.update_data(pv=int(m.text))
-        await m.answer("Введите количество активаций:")
+        await m.answer("Введите количество активаций:", reply_markup=CANCEL_KB)
         await state.set_state(AdminStates.wait_for_promo_uses)
     except:
         await m.answer("❌ Введите число!")
@@ -890,7 +1451,7 @@ async def adm_et_req(c: CallbackQuery, state: FSMContext):
     await state.update_data(ek=key)
     s = get_bot_settings()
     cur = s.get(key, "—")
-    await c.message.answer(f"Текущий текст:\n{cur}\n\n✏️ Введите новый текст (HTML поддерживается):")
+    await c.message.answer(f"Текущий текст:\n{cur}\n\n✏️ Введите новый текст (HTML поддерживается):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_text)
 
 
@@ -908,7 +1469,7 @@ async def adm_et_sv(m: Message, state: FSMContext):
 async def adm_gif_req(c: CallbackQuery, state: FSMContext):
     s = get_bot_settings()
     cur = s.get("start_media_id", "—")
-    await c.message.answer(f"Текущий GIF ID: <code>{cur}</code>\n\n🖼 Отправьте новый GIF (анимацию):")
+    await c.message.answer(f"Текущий GIF ID: <code>{cur}</code>\n\n🖼 Отправьте новый GIF (анимацию):", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_gif)
 
 
@@ -916,6 +1477,11 @@ async def adm_gif_req(c: CallbackQuery, state: FSMContext):
 async def adm_gif_sv(m: Message, state: FSMContext):
     set_bot_setting("start_media_id", m.animation.file_id)
     await m.answer(f"✅ GIF обновлён!\nID: <code>{m.animation.file_id}</code>")
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_gif, F.text.startswith("/"))
+async def adm_gif_cmd(m: Message, state: FSMContext):
     await state.clear()
 
 
@@ -931,7 +1497,8 @@ async def adm_sticker_req(c: CallbackQuery, state: FSMContext):
     await c.message.answer(
         f"Текущий стикер ID: <code>{cur}</code>\n\n"
         "🎭 Отправьте стикер, который будет показываться при команде /start\n"
-        "(или напишите «0» для отключения стикера):"
+        "(или напишите «0» для отключения стикера):",
+        reply_markup=CANCEL_KB
     )
     await state.set_state(AdminStates.wait_for_sticker)
 
@@ -950,6 +1517,249 @@ async def adm_sticker_clear(m: Message, state: FSMContext):
     await state.clear()
 
 
+@admin_router.message(AdminStates.wait_for_sticker, F.text.startswith("/"))
+async def adm_sticker_cmd(m: Message, state: FSMContext):
+    await state.clear()
+
+
 @admin_router.message(AdminStates.wait_for_sticker)
 async def adm_sticker_wrong(m: Message, state: FSMContext):
     await m.answer("❌ Отправьте стикер или напишите «0» для отключения.")
+
+
+# ─── ОБЯЗАТЕЛЬНАЯ ПОДПИСКА НА КАНАЛ ──────────────────────────────────────────
+
+def _forced_sub_kb(s):
+    enabled = s.get("forced_sub_enabled", "0") == "1"
+    channel = s.get("forced_sub_channel", "не задан")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅ Включена' if enabled else '❌ Выключена'} — нажать для переключения",
+            callback_data="forced_sub_toggle"
+        )],
+        [InlineKeyboardButton(text=f"📢 Канал: {channel}", callback_data="forced_sub_set_channel")],
+        [InlineKeyboardButton(text="✏️ Текст сообщения", callback_data="forced_sub_set_text")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
+    ])
+
+
+@admin_router.callback_query(F.data == "admin_forced_sub", F.from_user.id.in_(ADMIN_IDS))
+async def admin_forced_sub_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    enabled = s.get("forced_sub_enabled", "0") == "1"
+    channel = s.get("forced_sub_channel", "не задан")
+    text_preview = s.get("forced_sub_text", "🔒 Для использования бота необходимо подписаться на наш канал.")[:80]
+    await c.message.edit_text(
+        f"📢 <b>Обязательная подписка на канал</b>\n\n"
+        f"Статус: {'✅ Включена' if enabled else '❌ Выключена'}\n"
+        f"Канал: <code>{channel}</code>\n"
+        f"Текст: {text_preview}",
+        reply_markup=_forced_sub_kb(s)
+    )
+
+
+@admin_router.callback_query(F.data == "forced_sub_toggle", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_toggle(c: CallbackQuery):
+    s = get_bot_settings()
+    current = s.get("forced_sub_enabled", "0")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting("forced_sub_enabled", new_val)
+    await c.answer("✅ Включена" if new_val == "1" else "❌ Выключена")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_forced_sub_kb(s))
+
+
+@admin_router.callback_query(F.data == "forced_sub_set_channel", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_set_channel_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("forced_sub_channel", "")
+    await c.message.answer(
+        f"📢 <b>Укажите username или ID канала</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите username (например <code>@mychannel</code>) или числовой ID канала.\n"
+        "Бот должен быть администратором канала!",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_forced_sub_channel)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_forced_sub_channel)
+async def forced_sub_save_channel(m: Message, state: FSMContext):
+    val = m.text.strip()
+    set_bot_setting("forced_sub_channel", val)
+    await m.answer(f"✅ Канал сохранён: <code>{val}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "forced_sub_set_text", F.from_user.id.in_(ADMIN_IDS))
+async def forced_sub_set_text_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("forced_sub_text", "🔒 Для использования бота необходимо подписаться на наш канал.")
+    await c.message.answer(
+        f"✏️ <b>Текст сообщения обязательной подписки</b>\n\n"
+        f"Текущий текст:\n{cur}\n\n"
+        "Введите новый текст (HTML поддерживается):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_forced_sub_text)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_forced_sub_text)
+async def forced_sub_save_text(m: Message, state: FSMContext):
+    set_bot_setting("forced_sub_text", m.text.strip())
+    await m.answer("✅ Текст сообщения сохранён!")
+    await state.clear()
+
+
+# ─── MARZBAN API ───────────────────────────────────────────────────────────────
+
+def _marzban_kb(s):
+    enabled = s.get("marzban_enabled", "0") == "1"
+    url = s.get("marzban_url", "") or "не задан"
+    adm_user = s.get("marzban_admin_user", "") or "не задан"
+    inbound = s.get("marzban_inbound", "") or "не задан"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅ Включён' if enabled else '❌ Выключен'} — нажать для переключения",
+            callback_data="marzban_toggle"
+        )],
+        [InlineKeyboardButton(text=f"🌐 URL: {url[:30]}", callback_data="marzban_set_url")],
+        [InlineKeyboardButton(text=f"👤 Логин: {adm_user}", callback_data="marzban_set_user")],
+        [InlineKeyboardButton(text="🔑 Пароль: ••••••", callback_data="marzban_set_pass")],
+        [InlineKeyboardButton(text=f"📡 Inbound: {inbound}", callback_data="marzban_set_inbound")],
+        [InlineKeyboardButton(text="🔍 Проверить подключение", callback_data="marzban_test")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
+    ])
+
+
+@admin_router.callback_query(F.data == "admin_marzban", F.from_user.id.in_(ADMIN_IDS))
+async def admin_marzban_menu(c: CallbackQuery):
+    s = get_bot_settings()
+    enabled = s.get("marzban_enabled", "0") == "1"
+    url = s.get("marzban_url", "") or "не задан"
+    adm_user = s.get("marzban_admin_user", "") or "не задан"
+    inbound = s.get("marzban_inbound", "") or "не задан"
+    await c.message.edit_text(
+        "🔌 <b>Marzban API</b>\n\n"
+        f"Статус: {'✅ Включён' if enabled else '❌ Выключен'}\n"
+        f"URL: <code>{url}</code>\n"
+        f"Логин: <code>{adm_user}</code>\n"
+        f"Inbound: <code>{inbound}</code>\n\n"
+        "При включении Marzban пользователям при покупке автоматически создаётся "
+        "аккаунт на Marzban-сервере и выдаётся персональная ссылка подключения.",
+        reply_markup=_marzban_kb(s)
+    )
+
+
+@admin_router.callback_query(F.data == "marzban_toggle", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_toggle(c: CallbackQuery):
+    s = get_bot_settings()
+    current = s.get("marzban_enabled", "0")
+    new_val = "0" if current == "1" else "1"
+    set_bot_setting("marzban_enabled", new_val)
+    await c.answer("✅ Включён" if new_val == "1" else "❌ Выключен")
+    s = get_bot_settings()
+    await c.message.edit_reply_markup(reply_markup=_marzban_kb(s))
+
+
+@admin_router.callback_query(F.data == "marzban_set_url", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_url_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_url", "")
+    await c.message.answer(
+        f"🌐 <b>URL Marzban-сервера</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите URL (например: <code>https://marzban.example.com</code>)\n"
+        "или «0» для очистки:",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_url)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_url)
+async def marzban_save_url(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip().rstrip("/")
+    set_bot_setting("marzban_url", val)
+    await m.answer(f"✅ URL сохранён: <code>{val or 'очищен'}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_user", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_user_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_admin_user", "")
+    await c.message.answer(
+        f"👤 <b>Логин администратора Marzban</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите логин (или «0» для очистки):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_admin_user)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_admin_user)
+async def marzban_save_user(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_admin_user", val)
+    await m.answer("✅ Логин сохранён!")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_pass", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_pass_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer(
+        "🔑 <b>Пароль администратора Marzban</b>\n\n"
+        "Введите пароль (или «0» для очистки):\n\n"
+        "⚠️ Сообщение с паролем будет удалено после сохранения.",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_admin_pass)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_admin_pass)
+async def marzban_save_pass(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_admin_pass", val)
+    try:
+        await m.delete()
+    except Exception:
+        pass
+    await m.answer("✅ Пароль сохранён!")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_set_inbound", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_set_inbound_req(c: CallbackQuery, state: FSMContext):
+    s = get_bot_settings()
+    cur = s.get("marzban_inbound", "")
+    await c.message.answer(
+        f"📡 <b>Inbound тег Marzban</b>\n\n"
+        f"Текущий: <code>{cur or 'не задан'}</code>\n\n"
+        "Введите тег inbound (например: <code>vless-tcp</code>), "
+        "или «0» для очистки (будет использоваться первый доступный):",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_marzban_inbound)
+    await c.answer()
+
+
+@admin_router.message(AdminStates.wait_for_marzban_inbound)
+async def marzban_save_inbound(m: Message, state: FSMContext):
+    val = "" if m.text.strip() == "0" else m.text.strip()
+    set_bot_setting("marzban_inbound", val)
+    await m.answer(f"✅ Inbound сохранён: <code>{val or 'будет использоваться первый доступный'}</code>")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "marzban_test", F.from_user.id.in_(ADMIN_IDS))
+async def marzban_test_conn(c: CallbackQuery):
+    await c.answer("⏳ Проверяю подключение...")
+    ok, msg = await marzban_test_connection()
+    await c.message.answer(
+        f"🔌 <b>Проверка подключения к Marzban</b>\n\n{msg}"
+    )

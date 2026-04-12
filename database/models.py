@@ -26,6 +26,7 @@ def init_db():
         sub_expires TEXT,
         plan TEXT,
         vpn_key TEXT,
+        sub_url TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         bonus_days INTEGER DEFAULT 0,
         balance INTEGER DEFAULT 0,
@@ -84,11 +85,11 @@ def init_db():
     count = conn.execute("SELECT COUNT(*) as c FROM plans").fetchone()["c"]
     if count == 0:
         defaults = [
-            ("plan_free", "Бесплатный (Швеция)", 36500, 5, 0, 0, "https://t.me/your_free_vpn_link", 1),
-            ("plan_30", "1 месяц", 30, 5, 299, 150, "https://t.me/your_paid_vpn_link", 2),
-            ("plan_90", "3 месяца", 90, 5, 799, 400, "https://t.me/your_paid_vpn_link", 3),
-            ("plan_180", "6 месяцев", 180, 5, 1499, 750, "https://t.me/your_paid_vpn_link", 4),
-            ("plan_365", "12 месяцев", 365, 5, 2799, 1400, "https://t.me/your_paid_vpn_link", 5),
+            ("plan_trial", "Пробный (3 дня)", 3, 1, 0, 0, "Ссылка не задана", 1),
+            ("plan_30", "1 месяц", 30, 5, 299, 150, "Ссылка не задана", 2),
+            ("plan_90", "3 месяца", 90, 5, 799, 400, "Ссылка не задана", 3),
+            ("plan_180", "6 месяцев", 180, 5, 1499, 750, "Ссылка не задана", 4),
+            ("plan_365", "12 месяцев", 365, 5, 2799, 1400, "Ссылка не задана", 5),
         ]
         conn.executemany(
             "INSERT OR IGNORE INTO plans (code,label,days,max_devices,price_rub,price_stars,vpn_link,sort_order) VALUES (?,?,?,?,?,?,?,?)",
@@ -101,6 +102,22 @@ def init_db():
     except Exception:
         pass
 
+    # Миграция: добавить колонку sub_url если её нет
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN sub_url TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
+    # Миграция: добавить план пробного периода если его нет
+    existing_trial = conn.execute("SELECT id FROM plans WHERE code='plan_trial'").fetchone()
+    if not existing_trial:
+        conn.execute(
+            "INSERT OR IGNORE INTO plans (code,label,days,max_devices,price_rub,price_stars,vpn_link,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+            ("plan_trial", "Пробный (3 дня)", 3, 1, 0, 0, "Ссылка не задана", 1)
+        )
+        conn.commit()
+
     # Миграция: таблица подключённых устройств (ИСПРАВЛЕНО - убран DEFAULT)
     conn.execute("""
     CREATE TABLE IF NOT EXISTS vpn_devices (
@@ -108,6 +125,17 @@ def init_db():
         user_id TEXT NOT NULL,
         device_name TEXT NOT NULL,
         connected_at TEXT
+    )
+    """)
+
+    # Таблица отправленных уведомлений (для защиты от дублирования)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS notifications_sent (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        notif_key TEXT NOT NULL,
+        sent_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, notif_key)
     )
     """)
 
@@ -129,19 +157,50 @@ def get_all_users():
     return [dict(r) for r in rows]
 
 
-def create_user(user_id, full_name, username, referrer_id=None):
+def create_user(user_id, full_name, username, referrer_id=None) -> bool:
+    """Creates a new user record. Returns True if a new user was created, False if already existed."""
     conn = get_conn()
     existing = conn.execute("SELECT user_id FROM users WHERE user_id=?", (str(user_id),)).fetchone()
     if not existing:
         conn.execute("INSERT OR IGNORE INTO users (user_id, full_name, username, referrer_id) VALUES (?,?,?,?)",
                      (str(user_id), full_name, username or "", str(referrer_id) if referrer_id else None))
         conn.commit()
+        conn.close()
+        return True
     conn.close()
+    return False
 
 
 def update_user_balance(user_id, amount):
     conn = get_conn()
     conn.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, str(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def update_user_sub_url(user_id, sub_url: str):
+    """Store the per-user Marzban subscription URL."""
+    conn = get_conn()
+    conn.execute("UPDATE users SET sub_url=? WHERE user_id=?", (sub_url, str(user_id)))
+    conn.commit()
+    conn.close()
+
+
+def has_used_trial(user_id) -> bool:
+    """Returns True if the user has ever activated the trial plan."""
+    conn = get_conn()
+    r = conn.execute(
+        "SELECT id FROM subscriptions WHERE user_id=? AND plan='plan_trial'",
+        (str(user_id),)
+    ).fetchone()
+    conn.close()
+    return r is not None
+
+
+def update_user_vpn_key(user_id, vpn_key: str):
+    """Store the per-user VPN key (e.g. a Marzban subscription link)."""
+    conn = get_conn()
+    conn.execute("UPDATE users SET vpn_key=? WHERE user_id=?", (vpn_key, str(user_id)))
     conn.commit()
     conn.close()
 
@@ -172,6 +231,13 @@ def set_subscription(user_id, plan_code, days, price):
                  (expires.isoformat(), plan_code, str(user_id)))
     conn.execute("INSERT INTO subscriptions (user_id, plan, price, started_at, expires_at) VALUES (?,?,?,?,?)",
                  (str(user_id), plan_code, price, now.isoformat(), expires.isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def revoke_subscription(user_id):
+    conn = get_conn()
+    conn.execute("UPDATE users SET sub_expires=NULL, plan=NULL WHERE user_id=?", (str(user_id),))
     conn.commit()
     conn.close()
 
@@ -350,5 +416,62 @@ def delete_user_device(device_id):
     """Удалить устройство по ID."""
     conn = get_conn()
     conn.execute("DELETE FROM vpn_devices WHERE id=?", (device_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_users_expiring_soon(hours_before: int):
+    """Возвращает пользователей, у которых подписка истекает в окне (hours_before±1) ч от текущего времени."""
+    import datetime as dt
+    conn = get_conn()
+    now = dt.datetime.utcnow()
+    lower = (now + dt.timedelta(hours=hours_before - 1)).isoformat()
+    upper = (now + dt.timedelta(hours=hours_before + 1)).isoformat()
+    rows = conn.execute(
+        "SELECT * FROM users WHERE is_banned=0 AND sub_expires BETWEEN ? AND ?",
+        (lower, upper)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_users_not_connected(hours_after: int):
+    """Возвращает пользователей, оформивших подписку (hours_after±1) ч назад, без подключённых устройств."""
+    import datetime as dt
+    conn = get_conn()
+    now = dt.datetime.utcnow()
+    lower = (now - dt.timedelta(hours=hours_after + 1)).isoformat()
+    upper = (now - dt.timedelta(hours=hours_after - 1)).isoformat()
+    rows = conn.execute(
+        """SELECT u.user_id, u.is_banned, s.started_at FROM users u
+           JOIN subscriptions s ON s.user_id = u.user_id
+           WHERE u.is_banned = 0
+           AND s.started_at BETWEEN ? AND ?
+           AND NOT EXISTS (SELECT 1 FROM vpn_devices d WHERE d.user_id = u.user_id)
+           GROUP BY u.user_id""",
+        (lower, upper)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def check_notification_sent(user_id, notif_key):
+    """Возвращает True, если уведомление уже было отправлено."""
+    conn = get_conn()
+    r = conn.execute(
+        "SELECT 1 FROM notifications_sent WHERE user_id=? AND notif_key=?",
+        (str(user_id), notif_key)
+    ).fetchone()
+    conn.close()
+    return r is not None
+
+
+def mark_notification_sent(user_id, notif_key):
+    """Помечает уведомление как отправленное."""
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR IGNORE INTO notifications_sent (user_id, notif_key) VALUES (?,?)",
+        (str(user_id), notif_key)
+    )
     conn.commit()
     conn.close()
