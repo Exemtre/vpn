@@ -333,7 +333,7 @@ async def _activate_and_notify(bot, user_id: int, plan_code: str, days: int, pri
     await _send_active_vpn_screen(user_id, fresh_user, bot=bot)
     # Restore the main reply keyboard so bottom buttons are always visible
     try:
-        await bot.send_message(user_id, "\u00a0", reply_markup=get_main_reply_kb(user_id))
+        await bot.send_message(user_id, "\u200b", reply_markup=get_main_reply_kb(user_id))
     except Exception:
         pass
 
@@ -447,11 +447,11 @@ async def cmd_start(message: Message):
         except:
             pass
         if gif_sent:
-            await message.answer("\u00a0", reply_markup=get_main_reply_kb(message.from_user.id))
+            await message.answer("\u200b", reply_markup=get_main_reply_kb(message.from_user.id))
             return
 
     await message.answer(text, reply_markup=get_main_reply_kb(message.from_user.id))
-    await message.answer("\u00a0", reply_markup=main_menu_kb())
+    await message.answer("\u200b", reply_markup=main_menu_kb())
 
 
 @user_router.message(F.text.endswith("Подключить VPN"))
@@ -695,13 +695,18 @@ async def ref_menu_cb(c: CallbackQuery):
     me = await c.bot.get_me()
     stats = get_referral_stats(c.from_user.id)
     link = f"https://t.me/{me.username}?start={c.from_user.id}"
+    s = get_bot_settings()
+    e_ref     = ce(s.get("ge_ref",        "0"), "🤝")
+    e_card    = ce(s.get("ge_ref_card",   "0"), "💳")
+    e_people  = ce(s.get("ge_ref_people", "0"), "👥")
+    e_target  = ce(s.get("ge_ref_target", "0"), "🎯")
     text = (
-        "🤝 <b>Если Вам понравился наш сервис, рекомендуйте нас друзьям!</b>\n\n"
-        "💳 <b>За каждую покупку приглашённых (от 1 месяца) — +10 дней к вашей подписке.</b>\n\n"
-        f"👥 <b>Всего приглашено:</b> {stats['total']} чел.\n"
+        f"{e_ref} <b>Если Вам понравился наш сервис, рекомендуйте нас друзьям!</b>\n\n"
+        f"{e_card} <b>За каждую покупку приглашённых (от 1 месяца) — +10 дней к вашей подписке.</b>\n\n"
+        f"{e_people} <b>Всего приглашено:</b> {stats['total']} чел.\n"
         f"┝ С пробной: {stats['trial']} чел.\n"
         f"┕ С премиум: {stats['premium']} чел.\n\n"
-        f"🎯 <b>Ссылка:</b> <code>{link}</code>"
+        f"{e_target} <b>Ссылка:</b> <code>{link}</code>"
     )
     kb = InlineKeyboardMarkup(
         inline_keyboard=[[make_btn("btn_back", "Вернуться", "back_to_main", "btn_back_emoji", "🔙")]])
@@ -1288,11 +1293,11 @@ async def back_h(c: CallbackQuery):
         except:
             pass
         if gif_sent:
-            await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
+            await c.bot.send_message(c.from_user.id, "\u200b", reply_markup=get_main_reply_kb(c.from_user.id))
             await c.answer()
             return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
-    await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=main_menu_kb())
+    await c.bot.send_message(c.from_user.id, "\u200b", reply_markup=main_menu_kb())
     await c.answer()
 
 
@@ -1327,12 +1332,12 @@ async def forced_sub_check_cb(c: CallbackQuery):
             except:
                 pass
             if gif_sent:
-                await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=get_main_reply_kb(c.from_user.id))
+                await c.bot.send_message(c.from_user.id, "\u200b", reply_markup=get_main_reply_kb(c.from_user.id))
                 await c.answer("✅ Добро пожаловать!")
                 return
 
         await c.bot.send_message(c.from_user.id, text, reply_markup=get_main_reply_kb(c.from_user.id))
-        await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=main_menu_kb())
+        await c.bot.send_message(c.from_user.id, "\u200b", reply_markup=main_menu_kb())
         await c.answer("✅ Добро пожаловать!")
     else:
         await c.answer("❌ Вы ещё не подписались на канал!", show_alert=True)
