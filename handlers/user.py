@@ -91,19 +91,21 @@ def get_main_reply_kb(user_id: int):
 def make_btn(text_key, default_text, cb_data, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
-    eid = s.get(emoji_key, "0")
+    eid = s.get(emoji_key, "")
     if _is_valid_emoji_id(eid):
         return InlineKeyboardButton(text=text, callback_data=cb_data, icon_custom_emoji_id=str(eid))
-    return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, callback_data=cb_data)
+    char = eid if (eid and eid != "0") else static_emoji
+    return InlineKeyboardButton(text=f"{char} {text}" if char else text, callback_data=cb_data)
 
 
 def make_url_btn(text_key, default_text, url, emoji_key, static_emoji=""):
     s = get_bot_settings()
     text = s.get(text_key, default_text)
-    eid = s.get(emoji_key, "0")
+    eid = s.get(emoji_key, "")
     if _is_valid_emoji_id(eid):
         return InlineKeyboardButton(text=text, url=url, icon_custom_emoji_id=str(eid))
-    return InlineKeyboardButton(text=f"{static_emoji} {text}" if static_emoji else text, url=url)
+    char = eid if (eid and eid != "0") else static_emoji
+    return InlineKeyboardButton(text=f"{char} {text}" if char else text, url=url)
 
 
 def _build_dual_emoji_btn(s, label, char_key, default_char, id_key, url=None, cb=None):
@@ -839,20 +841,21 @@ def tariff_kb(plans, dev, is_gift):
     cb_p, dev_p = ("gift_pay", "gift_dev") if is_gift else ("pay_select", "dev_set")
 
     dev_row = []
-    if _is_valid_emoji_id(down_id):
-        dev_row.append(
-            InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
-    elif dev > 1:
-        dev_row.append(InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}"))
+    if dev > 1:
+        if _is_valid_emoji_id(down_id):
+            dev_row.append(InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}", icon_custom_emoji_id=str(down_id)))
+        else:
+            dev_row.append(InlineKeyboardButton(text=down_e, callback_data=f"{dev_p}_{p_c}"))
     else:
         dev_row.append(InlineKeyboardButton(text=down_e, callback_data="ignore"))
 
     dev_row.append(InlineKeyboardButton(text=str(dev), callback_data="ignore"))
 
-    if _is_valid_emoji_id(up_id):
-        dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
-    elif dev < 15:
-        dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}"))
+    if dev < 15:
+        if _is_valid_emoji_id(up_id):
+            dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}", icon_custom_emoji_id=str(up_id)))
+        else:
+            dev_row.append(InlineKeyboardButton(text=up_e, callback_data=f"{dev_p}_{n_c}"))
     else:
         dev_row.append(InlineKeyboardButton(text=up_e, callback_data="ignore"))
 

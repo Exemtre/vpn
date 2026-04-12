@@ -42,6 +42,7 @@ class AdminStates(StatesGroup):
     wait_for_promo_uses = State()
     wait_for_btn_text = State()
     wait_for_btn_emoji = State()
+    wait_for_btn_char_emoji = State()
     wait_for_global_emoji = State()
     wait_for_info_url = State()
     wait_for_free_link = State()
@@ -490,16 +491,25 @@ async def admin_btn_sub(c: CallbackQuery, state: FSMContext):
     tk, ek = BTN_MAPPING.get(btn, (f"btn_{btn}", f"btn_{btn}_emoji"))
     cur_text = s.get(tk, "—")
     cur_emoji = s.get(ek, "0")
+    # Determine emoji display status
+    if cur_emoji and cur_emoji != "0" and str(cur_emoji).strip().isdigit():
+        emoji_status = f"Кастомный ID: <code>{cur_emoji}</code>"
+    elif cur_emoji and cur_emoji != "0":
+        emoji_status = f"Символ: {cur_emoji}"
+    else:
+        emoji_status = "Эмодзи не задан"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Изменить текст", callback_data="be_text")],
-        [InlineKeyboardButton(text="🎭 Изменить кастомный эмодзи (ID)", callback_data="be_emoji")],
+        [InlineKeyboardButton(text="😀 Изменить символ эмодзи", callback_data="be_char")],
+        [InlineKeyboardButton(text="🎭 Изменить кастомный ID (Premium)", callback_data="be_emoji")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_select_btn_to_edit")]
     ])
     await c.message.edit_text(
         f"✏️ <b>Настройка кнопки: {BTN_LABELS.get(btn, btn)}</b>\n\n"
         f"Текущий текст: <b>{cur_text}</b>\n"
-        f"Текущий Emoji ID: <code>{cur_emoji}</code>\n\n"
-        "💡 Для кастомного эмодзи — скопируйте ID эмодзи из любого сета в Telegram.",
+        f"Текущий эмодзи: {emoji_status}\n\n"
+        "💡 <b>Символ</b> — любой юникод эмодзи (например 🤝).\n"
+        "<b>Кастомный ID</b> — числовой ID эмодзи из Premium-сета Telegram.",
         reply_markup=kb
     )
 
@@ -508,6 +518,15 @@ async def admin_btn_sub(c: CallbackQuery, state: FSMContext):
 async def be_t_req(c: CallbackQuery, state: FSMContext):
     await c.message.answer("✏️ Введите новый текст кнопки:", reply_markup=CANCEL_KB)
     await state.set_state(AdminStates.wait_for_btn_text)
+
+
+@admin_router.callback_query(F.data == "be_char")
+async def be_c_req(c: CallbackQuery, state: FSMContext):
+    await c.message.answer(
+        "😀 Введите символ эмодзи для кнопки (например 🤝) или «0» для сброса:",
+        reply_markup=CANCEL_KB
+    )
+    await state.set_state(AdminStates.wait_for_btn_char_emoji)
 
 
 @admin_router.callback_query(F.data == "be_emoji")
@@ -535,10 +554,27 @@ async def bs_e(m: Message, state: FSMContext):
         await m.answer("✅ Эмодзи сброшен.")
     elif val.isdigit():
         set_bot_setting(ek, val)
-        await m.answer("✅ Эмодзи обновлён!")
+        await m.answer("✅ Кастомный ID сохранён!")
     else:
         await m.answer("❌ Введите числовой ID кастомного эмодзи или «0» для сброса!")
         return
+    await state.clear()
+
+
+@admin_router.message(AdminStates.wait_for_btn_char_emoji)
+async def bs_c(m: Message, state: FSMContext):
+    d = await state.get_data()
+    _, ek = BTN_MAPPING.get(d['editing_btn'], ("", f"btn_{d['editing_btn']}_emoji"))
+    val = m.text.strip()
+    if val == "0":
+        set_bot_setting(ek, "0")
+        await m.answer("✅ Эмодзи сброшен.")
+    elif val.isdigit():
+        await m.answer("❌ Для числового ID используйте «Кастомный ID»! Введите символ (например 🤝) или «0» для сброса.")
+        return
+    else:
+        set_bot_setting(ek, val)
+        await m.answer(f"✅ Символ эмодзи обновлён: {val}")
     await state.clear()
 
 
