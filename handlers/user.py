@@ -1298,6 +1298,7 @@ async def back_h(c: CallbackQuery):
             await c.answer()
             return
     await c.bot.send_message(c.from_user.id, text, reply_markup=kb)
+    await c.bot.send_message(c.from_user.id, "\u00a0", reply_markup=main_menu_kb())
     await c.answer()
 
 
